@@ -1,0 +1,245 @@
+Trading Strategy Analyzer - Cursor Rules
+Project Context
+You are developing a Python technical analysis system for a three-timeframe trading strategy (1D → H4 → M15).
+CRITICALLY IMPORTANT:
+Python does ONLY technical calculations and structural analysis
+Final trading decisions are made by Manus AI based on JSON context
+System is universal for any assets (XAUUSD, EURUSD, BTCUSD, etc.)
+Focus on retail liquidity and mass behavior against smart money
+Trading Strategy
+Three-Level Analysis:
+1D (Daily): Determine overall bias, market structure, Fibonacci zones
+H4 (4-Hour): Find entry zones (OTE/Premium), consolidation, bias confirmation
+M15 (15-Minute): Precise timing through manipulation and return
+Key Concepts:
+Swing High/Low: Structural points for trend direction determination
+Fibonacci Zones: Premium (>0.5), Discount (<0.5), OTE (0.618-0.786)
+SSL/BSL: Stop loss accumulation zones of retail traders
+Manipulation: Movement against expectations to collect liquidity
+OTE Consolidation: Accumulation in 0.618-0.786 zone before movement
+Setup Types:
+Counter-trend SSL hunt: 1D bullish + H4 OTE consolidation → long after downward manipulation
+Trend continuation: 1D and H4 aligned + H4 in Premium → trend continuation
+Structure break: Awaiting structure break when timeframes conflict
+
+System Architecture
+[Market Data] → [Python Analysis Engine] → [JSON Context] → [Manus AI] → [Trading Decision]
+
+Project Structure:
+
+trading_strategy_analyzer/
+├── src/
+│   ├── analyzers/
+│   │   ├── structure_analyzer.py      # Multi-timeframe structural analysis
+│   │   ├── fibonacci_analyzer.py      # Multi-timeframe Fibonacci
+│   │   ├── retail_analyzer.py         # Retail behavior analysis
+│   │   ├── setup_detector.py          # Trading setup detection
+│   │   └── manipulation_detector.py   # M15 manipulation detection
+│   ├── data/
+│   │   ├── data_collector.py         # Data collection 
+│   │   └── data_processor.py          # Data processing
+│   ├── core/
+│   │   ├── strategy_engine.py         # Main engine
+│   │   ├── context_builder.py         # JSON building for AI
+│   │   └── data_structures.py         # Base data structures
+│   └── utils/
+│       ├── config.py
+│       └── helpers.py
+├── tests/                             # Unit and integration tests
+├── output/                          # JSON files for Manus AI
+└── main.py                           # Main application
+
+Development Rules
+General Principles:
+Modularity: Each component is independent and testable
+Universality: Works with any assets through configuration
+Performance: Vectorized operations, caching
+Reliability: Handle edge cases, data validation
+Readability: Clear names, docstrings, typing
+
+Code Style:
+Use dataclasses for data structures
+Use type hints everywhere
+Use Enum for constant values
+Follow PEP 8 standards
+Add docstrings for all public methods
+
+Data Processing:
+Use pandas for time series work
+Use numpy for mathematical calculations
+Validate input data at each stage
+Handle NaN values and data gaps
+
+Testing:
+Write unit tests for each method
+Create integration tests for full cycle
+Use pytest as main framework
+Test on real historical data
+Specific Requirements
+
+1. Structure Analyzer
+
+# Adaptive parameters for swing detection
+swing_windows = {
+    "1D": 5,    # Wider window for daily chart
+    "4H": 3,    # Medium window for 4-hour
+    "15M": 2    # Narrow window for M15 precision
+}
+
+# Required methods:
+- detect_swing_points(data, timeframe) -> List[SwingPoint]
+- determine_structure_direction(swing_points) -> StructureDirection
+- calculate_structure_strength(swing_points) -> float
+
+2. Fibonacci Analyzer
+
+# Standard levels
+fib_levels = [0.0, 0.236, 0.382, 0.5, 0.618, 0.786, 1.0]
+ote_range = (0.618, 0.786)
+
+# Required methods:
+- calculate_fibonacci_retracement(high, low, current) -> FibonacciAnalysis
+- determine_current_zone(retracement_level) -> FibonacciZone
+- detect_ote_consolidation(data, ote_levels) -> bool
+
+3. Retail Analyzer
+
+# Criteria for S/R levels
+min_touches = 3
+price_tolerance = 0.001  # 0.1% of price
+
+# Required methods:
+- find_support_resistance_levels(data) -> List[SupportResistanceLevel]
+- analyze_retail_entry_probability(fib_zone, sr_levels) -> Dict
+- identify_liquidity_zones(structures, sr_levels) -> List[LiquidityZone]
+
+4. Setup Detector
+
+# Setup classification logic
+def classify_setup_type(d1_structure, h4_structure, h4_fib):
+    if (d1_bullish and h4_ote_consolidation):
+        return COUNTER_TREND_SSL_HUNT
+    elif (d1_h4_aligned and h4_premium):
+        return TREND_CONTINUATION
+    # ...
+
+5. Manipulation Detector
+
+# M15 consolidation criteria
+consolidation_criteria = {
+    "max_range_percent": 0.003,  # 0.3% of price
+    "max_movement_percent": 0.002,  # 0.2% total movement
+    "min_periods": 10  # Minimum 10 candles
+}
+
+6. Context Builder
+
+# JSON structure for Manus AI
+context_structure = {
+    "analysis_timestamp": "ISO format",
+    "symbol": "string",
+    "current_price": "float",
+    "multi_timeframe_structure": {...},
+    "fibonacci_analysis": {...},
+    "retail_behavior_analysis": {...},
+    "setup_analysis": {...},
+    "manipulation_status": {...},
+    "ai_analysis_questions": [...],
+    "trade_recommendation_request": {...}
+}
+
+Error Handling
+
+Data Validation:
+
+# Check for required columns
+required_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+
+# Check minimum data points
+min_data_points = {
+    "1D": 50,   # Minimum 50 days
+    "4H": 200,  # Minimum 200 4-hour candles
+    "15M": 500  # Minimum 500 15-minute candles
+}
+
+# Handle edge cases
+if len(swing_points) < 4:
+    return create_undefined_structure()
+
+Logging:
+
+import logging
+
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+
+# Log key stages
+logger.info(f"Analyzing {symbol} structure on {timeframe}")
+logger.warning(f"Insufficient data for {timeframe}: {len(data)} points")
+
+Configuration
+Asset Symbols:
+
+SYMBOL_MAPPING = {
+    "XAUUSD": "GC=F",      # Gold futures
+    "EURUSD": "EURUSD=X",  # EUR/USD
+    "GBPUSD": "GBPUSD=X",  # GBP/USD
+    "USDJPY": "USDJPY=X",  # USD/JPY
+    "BTCUSD": "BTC-USD",   # Bitcoin
+    "ETHUSD": "ETH-USD",   # Ethereum
+    "SPX500": "^GSPC",     # S&P 500
+    "NAS100": "^IXIC"      # NASDAQ
+}
+
+Analysis Parameters:
+
+ANALYSIS_CONFIG = {
+    "data_period": "3mo",           # Default data period
+    "atr_period": 14,               # ATR calculation period
+    "structure_strength_threshold": 0.7,  # Structure strength threshold
+    "confidence_threshold": 0.6,    # Minimum setup confidence
+    "risk_reward_minimum": 1.5      # Minimum R:R
+}
+
+Usage Examples
+Running Analysis:
+
+# Analyze Gold
+python main.py XAUUSD --period 3mo
+
+# Analyze EUR/USD
+python main.py EURUSD --period 6mo
+
+# Analyze Bitcoin
+python main.py BTCUSD --period 1mo
+
+
+Testing:
+
+# Run all tests
+pytest tests/ -v
+
+# Test specific component
+pytest tests/test_structure_analyzer.py -v
+
+# Test with coverage
+pytest tests/ --cov=src --cov-report=html
+
+Final Output
+The program should create JSON files in output/ folder with complete analysis context for Manus AI:
+
+output/manus_ai_context_XAUUSD_20240115_143000.json
+
+This JSON contains all technical calculations and specific questions for AI analysis of trading opportunities.
+
+Development Priorities
+Stage 1-2: Basic structure + Structure Analyzer
+Stage 3-4: Fibonacci Analyzer + Retail Analyzer
+Stage 5-6: Setup Detector + Manipulation Detector
+Stage 7-8: Context Builder + Main Engine
+Stage 9-10: Testing + Optimization
+
+Start by creating the basic project structure and gradually add functionality, testing each component before moving to the next.
