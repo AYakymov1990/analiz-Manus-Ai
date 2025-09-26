@@ -15,6 +15,8 @@ class FibonacciZone(Enum):
     DISCOUNT = "discount"    # < 0.5
     OTE = "ote"             # 0.618-0.786
     EQUILIBRIUM = "equilibrium"  # ~0.5
+    EXTENSION_ABOVE = "extension_above"  # > 1.0
+    EXTENSION_BELOW = "extension_below"  # < 0.0
 
 
 class SetupType(Enum):
