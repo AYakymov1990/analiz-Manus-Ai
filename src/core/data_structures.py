@@ -23,6 +23,8 @@ class SetupType(Enum):
     TREND_CONTINUATION = "trend_continuation"
     COUNTER_TREND_SSL_HUNT = "counter_trend_ssl_hunt"
     STRUCTURE_BREAK = "structure_break"
+    STRUCTURE_BREAK_WAIT = "structure_break_wait"
+    EXTENSION_REVERSAL = "extension_reversal"
     NO_SETUP = "no_setup"
 
 

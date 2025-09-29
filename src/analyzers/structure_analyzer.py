@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import logging
 from typing import List, Dict
 
 from ..core.data_structures import (
@@ -12,6 +13,7 @@ from ..core.data_structures import (
 class MultiTimeframeStructureAnalyzer:
     def __init__(self, symbol: str):
         self.symbol = symbol
+        self.logger = logging.getLogger(__name__)
         # Адаптивные параметры для разных таймфреймов
         self.swing_windows = {
             "1D": 5,
@@ -32,14 +34,20 @@ class MultiTimeframeStructureAnalyzer:
         """
         results: Dict[str, StructureAnalysis] = {}
 
-        swings_1d = self.detect_swing_points(data_1d, "1D")
-        results["1D"] = self.determine_structure(swings_1d, "1D")
-
-        swings_h4 = self.detect_swing_points(data_h4, "4H")
-        results["4H"] = self.determine_structure(swings_h4, "4H")
-
-        swings_m15 = self.detect_swing_points(data_m15, "15M")
-        results["15M"] = self.determine_structure(swings_m15, "15M")
+        for tf, df in (("1D", data_1d), ("4H", data_h4), ("15M", data_m15)):
+            try:
+                swings = self.detect_swing_points(df, tf)
+                # fallback, если свингов мало
+                if len(swings) < 2:
+                    self.logger.warning("Недостаточно swing точек для %s, используем window extremes fallback", tf)
+                    swings = self._get_window_extremes_as_swings(df, tf)
+                analysis = self.determine_structure(swings, tf)
+                results[tf] = self._validate_and_correct(df, analysis)
+            except Exception as ex:
+                self.logger.error("Ошибка анализа %s: %s. Применяем критический fallback.", tf, ex)
+                swings = self._get_window_extremes_as_swings(df, tf)
+                analysis = self.determine_structure(swings, tf)
+                results[tf] = analysis
 
         return results
 
@@ -61,8 +69,58 @@ class MultiTimeframeStructureAnalyzer:
             if col not in data.columns:
                 raise ValueError(f"Missing required column: {col}")
 
+        # Спец-предобработка для 15M: ограничение окна и клип аномалий по ATR
+        if timeframe == "15M" and len(data) > 0:
+            try:
+                # 1) Ограничим окно последними 7 днями
+                if hasattr(data.index, "tz"):
+                    cutoff = data.index[-1] - pd.Timedelta(days=7)
+                else:
+                    cutoff = pd.to_datetime(data.index[-1]) - pd.Timedelta(days=7)
+                data = data.loc[data.index >= cutoff]
+                # 2) Клип выбросов: High/Low за пределами ±8*ATR относительно Close
+                high = data["High"].astype(float)
+                low = data["Low"].astype(float)
+                close = data["Close"].astype(float)
+                tr = np.maximum(high - low, np.maximum((high - close.shift()).abs(), (low - close.shift()).abs()))
+                atr_series = pd.Series(tr).rolling(window=14, min_periods=1).mean().fillna(method="bfill")
+                upper = close + atr_series * 8.0
+                lower = close - atr_series * 8.0
+                # Применяем клип к копии, чтобы не трогать исходную ссылку
+                data = data.copy()
+                data["High"] = np.minimum(high.values, upper.values)
+                data["Low"] = np.maximum(low.values, lower.values)
+            except Exception:
+                # В случае проблем с индексом/данными — пропускаем предобработку
+                pass
+
+        # Логирование входных экстремумов окна
+        try:
+            hi_series = data["High"].astype(float)
+            lo_series = data["Low"].astype(float)
+            self.logger.info(
+                "SWING DETECTION START | tf=%s | %s → %s | points=%d | actual_high=%.2f (%s) | actual_low=%.2f (%s)",
+                timeframe,
+                str(data.index[0]),
+                str(data.index[-1]),
+                len(data),
+                float(hi_series.max()),
+                str(hi_series.idxmax()),
+                float(lo_series.min()),
+                str(lo_series.idxmin()),
+            )
+        except Exception:
+            pass
+
         swing_points: List[SwingPoint] = []
-        window = self.swing_windows[timeframe]
+        # Динамический размер окна: не больше предустановленного и не больше 10% длины ряда
+        preset = self.swing_windows[timeframe]
+        dyn = max(1, len(data) // 10)
+        window = max(1, min(preset, dyn))
+        # Если окно слишком велико для набора данных — используем экстремумы окна как swings
+        if window * 2 >= len(data):
+            # Вернём оба экстремума окна как swings (high и low)
+            return self._get_window_extremes_as_swings(data, timeframe)
 
         # Поиск swing highs
         for i in range(window, len(data) - window):
@@ -93,6 +151,39 @@ class MultiTimeframeStructureAnalyzer:
                 )
 
         swing_points.sort(key=lambda x: x.timestamp)
+
+        # Гарантируем минимум по одному high и low: добавим экстремумы окна при нехватке
+        highs_now = [s for s in swing_points if s.type == "high"]
+        lows_now = [s for s in swing_points if s.type == "low"]
+        if len(highs_now) == 0 or len(lows_now) == 0:
+            hi_series2 = data["High"].astype(float)
+            lo_series2 = data["Low"].astype(float)
+            if len(highs_now) == 0:
+                hi_idx = hi_series2.idxmax()
+                swing_points.append(
+                    SwingPoint(timestamp=hi_idx, price=float(hi_series2.max()), type="high", timeframe=timeframe, strength=1.0)
+                )
+            if len(lows_now) == 0:
+                lo_idx = lo_series2.idxmin()
+                swing_points.append(
+                    SwingPoint(timestamp=lo_idx, price=float(lo_series2.min()), type="low", timeframe=timeframe, strength=1.0)
+                )
+            swing_points.sort(key=lambda x: x.timestamp)
+
+        # Логирование результатов
+        try:
+            highs = [s for s in swing_points if s.type == "high"]
+            lows = [s for s in swing_points if s.type == "low"]
+            self.logger.info(
+                "SWING DETECTION RESULT | tf=%s | highs=%d lows=%d | last_high=%s | last_low=%s",
+                timeframe,
+                len(highs),
+                len(lows),
+                f"{highs[-1].price:.2f}" if highs else "None",
+                f"{lows[-1].price:.2f}" if lows else "None",
+            )
+        except Exception:
+            pass
         return swing_points
 
     def _is_swing_high(self, data: pd.DataFrame, index: int, window: int) -> bool:
@@ -232,6 +323,84 @@ class MultiTimeframeStructureAnalyzer:
             return 0.0
         strengths = [max(0.0, min(1.0, s.strength)) for s in swings]
         return float(np.mean(strengths))
+
+    def _validate_and_correct(self, data: pd.DataFrame, analysis: StructureAnalysis) -> StructureAnalysis:
+        """Строгая валидация: swing уровни должны присутствовать в OHLC текущего окна.
+        Если нет — корректируем на экстремумы окна, чтобы исключить "устаревшие" значения."""
+        # Строгий допуск: ±10 пунктов
+        strict_tol = 10.0
+        hi_series = data["High"].astype(float)
+        lo_series = data["Low"].astype(float)
+        sh = float(analysis.last_swing_high.price)
+        sl = float(analysis.last_swing_low.price)
+        hi_ok = ((hi_series >= sh - strict_tol) & (hi_series <= sh + strict_tol)).any()
+        lo_ok = ((lo_series >= sl - strict_tol) & (lo_series <= sl + strict_tol)).any()
+        if hi_ok and lo_ok:
+            return analysis
+
+        # Критическая ошибка — принудительная замена
+        self.logger.error(
+            "КРИТИЧЕСКАЯ ОШИБКА SWING DETECTION | tf=%s | swing_high=%.2f exists=%s | swing_low=%.2f exists=%s | "
+            "data_range: %s → %s | actual_high=%.2f actual_low=%.2f",
+            analysis.timeframe,
+            sh,
+            str(hi_ok),
+            sl,
+            str(lo_ok),
+            str(data.index[0]),
+            str(data.index[-1]),
+            float(hi_series.max()),
+            float(lo_series.min()),
+        )
+        return self._force_use_window_extremes(data, analysis)
+
+    def _force_use_window_extremes(self, data: pd.DataFrame, analysis: StructureAnalysis) -> StructureAnalysis:
+        hi_series = data["High"].astype(float)
+        lo_series = data["Low"].astype(float)
+        actual_high = float(hi_series.max())
+        actual_low = float(lo_series.min())
+        actual_high_date = hi_series.idxmax()
+        actual_low_date = lo_series.idxmin()
+
+        sp_hi = SwingPoint(timestamp=actual_high_date, price=actual_high, type="high", timeframe=analysis.timeframe, strength=0.9)
+        sp_lo = SwingPoint(timestamp=actual_low_date, price=actual_low, type="low", timeframe=analysis.timeframe, strength=0.9)
+
+        self.logger.warning(
+            "SWING CORRECTION APPLIED | tf=%s | old_high=%.2f → new_high=%.2f | old_low=%.2f → new_low=%.2f",
+            analysis.timeframe,
+            float(analysis.last_swing_high.price),
+            actual_high,
+            float(analysis.last_swing_low.price),
+            actual_low,
+        )
+
+        if actual_high_date > actual_low_date:
+            direction = StructureDirection.BULLISH
+            break_level = actual_low
+        else:
+            direction = StructureDirection.BEARISH
+            break_level = actual_high
+
+        return StructureAnalysis(
+            timeframe=analysis.timeframe,
+            direction=direction,
+            last_swing_high=sp_hi,
+            last_swing_low=sp_lo,
+            structure_strength=0.8,
+            break_level=float(break_level),
+            confidence=0.9,
+        )
+
+    def _get_window_extremes_as_swings(self, data: pd.DataFrame, timeframe: str) -> List[SwingPoint]:
+        if data is None or len(data) == 0:
+            return []
+        hi_series = data["High"].astype(float)
+        lo_series = data["Low"].astype(float)
+        high_idx = hi_series.idxmax()
+        low_idx = lo_series.idxmin()
+        swing_high = SwingPoint(timestamp=high_idx, price=float(hi_series.max()), type="high", timeframe=timeframe, strength=1.0)
+        swing_low = SwingPoint(timestamp=low_idx, price=float(lo_series.min()), type="low", timeframe=timeframe, strength=1.0)
+        return [swing_high, swing_low]
 
     def _calculate_atr(self, data: pd.DataFrame, period: int = 14) -> float:
         """Расчет Average True Range"""

@@ -1,0 +1,56 @@
+{
+  "retail_behavior_analysis": {
+    "market_sentiment": "fomo_buying",
+    "extension_scenario": true,
+    "retail_probabilities": {
+      "long_entries": 0.85,
+      "short_entries": 0.15
+    },
+    "support_resistance": {
+      "levels": [
+        {
+          "price": 3660.5,
+          "touches": 3,
+          "strength": 0.8,
+          "type": "support"
+        },
+        {
+          "price": 3824.60009765625,
+          "touches": 3,
+          "strength": 0.8,
+          "type": "resistance"
+        }
+      ]
+    },
+    "liquidity_zones": [
+      {
+        "price": 3656.8395,
+        "type": "SSL",
+        "strength": 0.6344319401736885,
+        "volume": "high",
+        "logic": "Retail stops placed below 1D swing low at 3660.5"
+      },
+      {
+        "price": 3785.211,
+        "type": "SSL",
+        "strength": 0.5943550079492114,
+        "volume": "medium",
+        "logic": "Retail stops placed below 4H swing low at 3789.0"
+      },
+      {
+        "price": 3828.424697753906,
+        "type": "BSL",
+        "strength": 0.6344319401736885,
+        "volume": "high",
+        "logic": "Retail stops placed above 1D swing high at 3824.60009765625"
+      },
+      {
+        "price": 3818.214302246093,
+        "type": "BSL",
+        "strength": 0.5943550079492114,
+        "volume": "medium",
+        "logic": "Retail stops placed above 4H swing high at 3814.39990234375"
+      }
+    ]
+  }
+}
