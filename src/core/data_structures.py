@@ -95,3 +95,11 @@ class ManipulationStatus:
     current_phase: str
 
 
+class ManipulationType(Enum):
+    STOP_HUNT_BELOW = "stop_hunt_below"
+    STOP_HUNT_ABOVE = "stop_hunt_above"
+    FALSE_BREAKOUT = "false_breakout"
+    LIQUIDITY_GRAB = "liquidity_grab"
+    NO_MANIPULATION = "no_manipulation"
+
+
