@@ -1,0 +1,227 @@
+{
+  "metadata": {
+    "symbol": "GC=F",
+    "analysis_timestamp": "2025-10-04T09:36:22.333040",
+    "data_windows": {
+      "1D": [
+        "2025-08-29 00:00:00+00:00",
+        "2025-10-03 00:00:00+00:00"
+      ],
+      "4H": [
+        "2025-09-19 20:00:00+00:00",
+        "2025-10-03 20:00:00+00:00"
+      ]
+    },
+    "validation_status": "all_swing_levels_validated_against_ohlc"
+  },
+  "market_structure": {
+    "1d": {
+      "direction": "sideways",
+      "strength": 0.4320291988593587,
+      "last_swing_high": {
+        "timestamp": "2025-09-26T00:00:00+00:00",
+        "price": 3814.39990234375,
+        "type": "high",
+        "timeframe": "1D",
+        "strength": 0.37823208136884495
+      },
+      "last_swing_low": {
+        "timestamp": "2025-09-29T00:00:00+00:00",
+        "price": 3792.89990234375,
+        "type": "low",
+        "timeframe": "1D",
+        "strength": 0.0
+      },
+      "break_level": 3803.64990234375,
+      "confidence": 0.5
+    },
+    "4h": {
+      "direction": "sideways",
+      "strength": 0.7482200436817031,
+      "last_swing_high": {
+        "timestamp": "2025-10-02T20:00:00+00:00",
+        "price": 3888.10009765625,
+        "type": "high",
+        "timeframe": "4H",
+        "strength": 0.0
+      },
+      "last_swing_low": {
+        "timestamp": "2025-10-03T00:00:00+00:00",
+        "price": 3861.10009765625,
+        "type": "low",
+        "timeframe": "4H",
+        "strength": 1.0
+      },
+      "break_level": 3874.60009765625,
+      "confidence": 0.5
+    },
+    "15m": {
+      "direction": "sideways",
+      "strength": 0.7622853310321601,
+      "last_swing_high": {
+        "timestamp": "2025-10-03T19:30:00+00:00",
+        "price": 3914.60009765625,
+        "type": "high",
+        "timeframe": "15M",
+        "strength": 0.6589695889543682
+      },
+      "last_swing_low": {
+        "timestamp": "2025-10-03T19:00:00+00:00",
+        "price": 3909.300048828125,
+        "type": "low",
+        "timeframe": "15M",
+        "strength": 0.6838300658696397
+      },
+      "break_level": 3911.9500732421875,
+      "confidence": 0.5
+    }
+  },
+  "fibonacci_analysis": {
+    "1d": {
+      "zone": "extension_above",
+      "retracement": 5.544195130813954,
+      "key_levels": {
+        "0.0": 3792.89990234375,
+        "0.236": 3797.97390234375,
+        "0.382": 3801.11290234375,
+        "0.5": 3803.64990234375,
+        "0.618": 3806.18690234375,
+        "0.786": 3809.79890234375,
+        "1.0": 3814.39990234375
+      },
+      "swing_high": 3814.39990234375,
+      "swing_low": 3792.89990234375,
+      "retail_implications": "extension_context_risk_of_reversal"
+    },
+    "4h": {
+      "zone": "extension_above",
+      "retracement": 1.8888888888888888,
+      "key_levels": {
+        "0.0": 3861.10009765625,
+        "0.236": 3867.47209765625,
+        "0.382": 3871.41409765625,
+        "0.5": 3874.60009765625,
+        "0.618": 3877.78609765625,
+        "0.786": 3882.32209765625,
+        "1.0": 3888.10009765625
+      },
+      "swing_high": 3888.10009765625,
+      "swing_low": 3861.10009765625
+    },
+    "15m": {
+      "zone": "premium",
+      "retracement": 0.5283062324381593,
+      "key_levels": {
+        "0.0": 3909.300048828125,
+        "0.236": 3910.5508603515623,
+        "0.382": 3911.3246674804686,
+        "0.5": 3911.9500732421875,
+        "0.618": 3912.5754790039064,
+        "0.786": 3913.4658872070313,
+        "1.0": 3914.60009765625
+      },
+      "swing_high": 3914.60009765625,
+      "swing_low": 3909.300048828125
+    }
+  },
+  "retail_behavior": {
+    "sentiment": "bearish_retail_interest",
+    "support_resistance": [
+      {
+        "price": 3792.89990234375,
+        "touches": 3,
+        "strength": 0.8,
+        "type": "support",
+        "retail_likely": true
+      },
+      {
+        "price": 3814.39990234375,
+        "touches": 3,
+        "strength": 0.8,
+        "type": "resistance",
+        "retail_likely": true
+      }
+    ],
+    "liquidity_zones": [
+      {
+        "price": 3789.107002441406,
+        "type": "SSL",
+        "strength": 0.4320291988593587,
+        "volume": "high",
+        "logic": "Retail stops placed below 1D swing low at 3792.89990234375"
+      },
+      {
+        "price": 3857.238997558594,
+        "type": "SSL",
+        "strength": 0.7482200436817031,
+        "volume": "medium",
+        "logic": "Retail stops placed below 4H swing low at 3861.10009765625"
+      },
+      {
+        "price": 3818.214302246093,
+        "type": "BSL",
+        "strength": 0.4320291988593587,
+        "volume": "high",
+        "logic": "Retail stops placed above 1D swing high at 3814.39990234375"
+      },
+      {
+        "price": 3891.9881977539058,
+        "type": "BSL",
+        "strength": 0.7482200436817031,
+        "volume": "medium",
+        "logic": "Retail stops placed above 4H swing high at 3888.10009765625"
+      }
+    ],
+    "vulnerability_assessment": {
+      "near_support": false,
+      "retail_likely_to_enter": false
+    }
+  },
+  "trading_setup": {
+    "type": "extension_reversal",
+    "confidence": 0.6666666666666666,
+    "conditions": {
+      "any_extension": true,
+      "fomo": true,
+      "aligned_bullish": false
+    },
+    "risk_reward": null,
+    "entry_criteria": {
+      "any_extension": true,
+      "fomo": true,
+      "aligned_bullish": false
+    }
+  },
+  "manipulation_context": {
+    "recent_manipulations": [
+      "no_manipulation"
+    ],
+    "expected_manipulation": "no_manipulation",
+    "timing_signals": {
+      "structure": {
+        "swing_low": 3842.800048828125,
+        "swing_high": 3916.800048828125,
+        "broke_below": false,
+        "broke_above": false,
+        "returned_above": false,
+        "returned_below": false
+      },
+      "volume": {
+        "volume_available": false,
+        "spike": false,
+        "zscore": 0.0
+      },
+      "momentum": {
+        "ema_up": false,
+        "ema_down": false,
+        "spike": false
+      }
+    }
+  },
+  "manus_ai_questions": [
+    "Should we execute counter-trend SSL hunt to 3789.107002441406 or wait for trend continuation?",
+    "What is the optimal entry timing given current extension_above and no_manipulation?",
+    "How should we manage risk in this extension_above with bearish_retail_interest?",
+    "What is the primary target: SSL hunt or structure continuation?"
+  ]
+}
