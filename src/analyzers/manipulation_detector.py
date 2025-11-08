@@ -15,14 +15,23 @@ class ManipulationResult:
 
 
 class ManipulationDetector:
-    def detect_manipulation(self, m15_data: pd.DataFrame, setup_context: Dict[str, Any]) -> ManipulationResult:
+    def detect_manipulation(
+        self,
+        m15_data: pd.DataFrame,
+        setup_context: Dict[str, Any],
+        m15_structure: Any = None,
+    ) -> ManipulationResult:
         if m15_data is None or len(m15_data) < 20:
             return ManipulationResult(ManipulationType.NO_MANIPULATION, 0.0, {"reason": "insufficient_data"})
 
         m15 = m15_data.copy()
         m15 = m15[["Open", "High", "Low", "Close"]].astype(float)
 
-        structure_breaks = self._detect_structure_breaks(m15)
+        # Если есть структура M15 — используем её свинги для строгой проверки манипуляции
+        if m15_structure is not None and getattr(m15_structure, "last_swing_low", None) is not None:
+            structure_breaks = self._detect_structure_breaks_m15(m15, m15_structure)
+        else:
+            structure_breaks = self._detect_structure_breaks(m15)
         volume_anomalies = self._analyze_volume_patterns(m15_data)
         momentum_spikes = self._detect_momentum_spikes(m15)
 
@@ -67,6 +76,40 @@ class ManipulationDetector:
         return {
             "swing_low": float(swing_low),
             "swing_high": float(swing_high),
+            "broke_below": bool(broke_below),
+            "broke_above": bool(broke_above),
+            "returned_above": bool(returned_above),
+            "returned_below": bool(returned_below),
+        }
+
+    def _detect_structure_breaks_m15(self, data: pd.DataFrame, m15_structure: Any) -> Dict[str, Any]:
+        """
+        Проверка манипуляции строго по последним M15 swing high/low из структуры.
+        """
+        swing_low = float(getattr(getattr(m15_structure, "last_swing_low", None), "price", np.nan))
+        swing_high = float(getattr(getattr(m15_structure, "last_swing_high", None), "price", np.nan))
+        window = data.tail(20)
+        broke_below = False
+        returned_above = False
+        broke_above = False
+        returned_below = False
+        if not np.isnan(swing_low):
+            below_mask = window["Close"] < swing_low
+            broke_below = bool(below_mask.any())
+            if broke_below:
+                first_idx = below_mask.idxmax()
+                after = window.loc[first_idx:]
+                returned_above = bool((after["Close"] > swing_low).any())
+        if not np.isnan(swing_high):
+            above_mask = window["Close"] > swing_high
+            broke_above = bool(above_mask.any())
+            if broke_above:
+                first_idx = above_mask.idxmax()
+                after = window.loc[first_idx:]
+                returned_below = bool((after["Close"] < swing_high).any())
+        return {
+            "swing_low": float(swing_low) if not np.isnan(swing_low) else None,
+            "swing_high": float(swing_high) if not np.isnan(swing_high) else None,
             "broke_below": bool(broke_below),
             "broke_above": bool(broke_above),
             "returned_above": bool(returned_above),

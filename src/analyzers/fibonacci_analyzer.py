@@ -52,6 +52,17 @@ class MultiTimeframeFibonacciAnalyzer:
             range_size = range_high - range_low
             retracement = (range_high - current_price) / range_size
 
+        # Авто-обновление свинга при явной экстензии: подтягиваем границу к текущей цене
+        if retracement > 1.0:
+            if is_bullish and current_price > range_high:
+                range_high = current_price
+                range_size = range_high - range_low
+                retracement = (current_price - range_low) / max(range_size, 1e-12)
+            elif (not is_bullish) and current_price < range_low:
+                range_low = current_price
+                range_size = range_high - range_low
+                retracement = (range_high - current_price) / max(range_size, 1e-12)
+
         levels: Dict[str, float] = {}
         for level in self.fib_levels:
             levels[str(level)] = range_low + (range_size * level)

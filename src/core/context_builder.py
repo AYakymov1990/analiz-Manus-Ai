@@ -102,6 +102,7 @@ def _serialize_liquidity_zone(z: LiquidityZone) -> Dict[str, Any]:
         "strength": float(z.strength),
         "volume": z.estimated_volume,
         "logic": z.retail_logic,
+        **({"timeframe": z.timeframe} if getattr(z, "timeframe", None) else {}),
     }
 
 
@@ -117,6 +118,8 @@ def _derive_sentiment(retail_entry_analysis: Dict[str, Any]) -> str:
 
 def build_manus_context(symbol: str, analysis_results: AnalysisResults) -> Dict[str, Any]:
     fib1d_zone = analysis_results.fibonacci["1D"].current_zone.value
+    fib4h_zone = analysis_results.fibonacci["4H"].current_zone.value
+    direction_1d = analysis_results.structures["1D"].direction.value
 
     # Retail blocks
     sr_levels_h4 = analysis_results.retail.get("support_resistance_levels_h4", [])
@@ -160,6 +163,7 @@ def build_manus_context(symbol: str, analysis_results: AnalysisResults) -> Dict[
             # Новый компактный формат — 4 ключевых уровня (без дублирующих массивов)
             **({"key_sr_levels": key_sr_levels_dict} if key_sr_levels_dict else {}),
             "liquidity_zones": [_serialize_liquidity_zone(z) for z in liq_zones],
+            **({"ote_consolidation_4h": analysis_results.retail.get("ote_consolidation_4h")} if analysis_results.retail.get("ote_consolidation_4h") is not None else {}),
             "vulnerability_assessment": {
                 "near_support": bool(retail_entry.get("nearby_support")),
                 "retail_likely_to_enter": bool(retail_entry.get("retail_likely_to_enter", False)),
@@ -177,6 +181,16 @@ def build_manus_context(symbol: str, analysis_results: AnalysisResults) -> Dict[
             "expected_manipulation": manip_type_val,
             "timing_signals": getattr(analysis_results.manipulation, "details", {}),
         },
+        "m15_analysis_condition": {
+            "should_analyze": fib4h_zone in ("ote", "discount"),
+            "reason": "4H in OTE/Discount zone" if fib4h_zone in ("ote", "discount") else "4H NOT in OTE/Discount zone",
+        },
+        "trade_filter": {
+            "1d_direction": direction_1d,
+            "4h_zone": fib4h_zone,
+            "allowed_directions": _calculate_allowed_directions(direction_1d, fib4h_zone),
+            "reasoning": _get_trade_filter_reasoning(direction_1d, fib4h_zone),
+        },
         "manus_ai_questions": [
             f"Should we execute counter-trend SSL hunt to {ssl_target} or wait for trend continuation?",
             f"What is the optimal entry timing given current {fib1d_zone} and {manip_type_val}?",
@@ -186,5 +200,26 @@ def build_manus_context(symbol: str, analysis_results: AnalysisResults) -> Dict[
     }
 
     return context
+
+
+def _calculate_allowed_directions(direction_1d: str, fib4h_zone: str) -> list:
+    if direction_1d == "bullish":
+        return ["LONG"] if fib4h_zone in ("discount", "ote") else []
+    if direction_1d == "bearish":
+        return ["SHORT"] if fib4h_zone in ("premium",) else []
+    # sideways
+    if fib4h_zone in ("discount", "ote"):
+        return ["LONG"]
+    if fib4h_zone in ("premium",):
+        return ["SHORT"]
+    return ["LONG", "SHORT"]
+
+
+def _get_trade_filter_reasoning(direction_1d: str, fib4h_zone: str) -> str:
+    if direction_1d == "bullish":
+        return "1D bullish + 4H in Discount/OTE → LONG only" if fib4h_zone in ("discount", "ote") else "1D bullish but 4H NOT in Discount/OTE → wait for pullback"
+    if direction_1d == "bearish":
+        return "1D bearish + 4H in Premium → SHORT only" if fib4h_zone in ("premium",) else "1D bearish but 4H NOT in Premium → wait for pullback"
+    return "1D sideways → trade both directions based on 4H zone"
 
 

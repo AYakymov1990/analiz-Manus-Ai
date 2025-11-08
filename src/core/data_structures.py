@@ -87,6 +87,7 @@ class LiquidityZone:
     strength: float
     estimated_volume: str  # "low", "medium", "high"
     retail_logic: str
+    timeframe: Optional[str] = None
     # Связь с источником (S&R и swing)
     derived_from_sr_price: Optional[float] = None
     derived_from_sr_boundaries: Optional[Tuple[float, float]] = None

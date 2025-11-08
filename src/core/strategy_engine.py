@@ -15,7 +15,8 @@ from ..analyzers.structure_analyzer import MultiTimeframeStructureAnalyzer
 from ..analyzers.fibonacci_analyzer import MultiTimeframeFibonacciAnalyzer
 from ..analyzers.retail_analyzer import RetailBehaviorAnalyzer
 from ..analyzers.setup_detector import SetupDetector
-from ..analyzers.manipulation_detector import ManipulationDetector
+from ..analyzers.manipulation_detector import ManipulationDetector, ManipulationResult
+from ..core.data_structures import ManipulationType
 from .context_builder import AnalysisResults, build_manus_context
 
 
@@ -89,6 +90,16 @@ class TradingAnalyzer:
             data_h4_extended=data.get("4H_FULL"),
             data_1d_extended=data.get("1D_FULL"),
         )
+        # Добавим признак OTE-консолидации на 4H (упрощённая версия)
+        try:
+            if fibs["4H"].current_zone.value == "ote":
+                ote_levels = (fibs["4H"].key_levels["0.618"], fibs["4H"].key_levels["0.786"])
+                is_cons = self.fibonacci_analyzer.detect_ote_consolidation(data["4H"], ote_levels)
+                retail["ote_consolidation_4h"] = {"is_consolidating": bool(is_cons), "in_ote_zone": True}
+            else:
+                retail["ote_consolidation_4h"] = {"is_consolidating": False, "in_ote_zone": False}
+        except Exception:
+            retail["ote_consolidation_4h"] = {"is_consolidating": False, "in_ote_zone": False}
         # Добавим 4H уровни S/R (SMC) в ретейл-контекст для приоритетного вывода
         try:
             retail["support_resistance_levels_h4"] = self.retail_analyzer.find_support_resistance_levels_h4(
@@ -97,17 +108,34 @@ class TradingAnalyzer:
         except Exception:
             retail["support_resistance_levels_h4"] = []
         setup = self.setup_detector.detect_setup(structures, fibs, retail)
-        manip = self.manipulation_detector.detect_manipulation(
-            data["15M"].tail(500),
-            {
-                "current_price": current_price,
-                "liquidity_zones": {
-                    "BSL": [z.price for z in retail["liquidity_zones"] if z.zone_type == "BSL"],
-                    "SSL": [z.price for z in retail["liquidity_zones"] if z.zone_type == "SSL"],
+
+        # Гейтинг M15 анализа: только если 4H в OTE или Discount
+        fib4h_zone = fibs["4H"].current_zone.value
+        should_analyze_m15 = fib4h_zone in ("ote", "discount")
+        if should_analyze_m15:
+            manip = self.manipulation_detector.detect_manipulation(
+                data["15M"].tail(500),
+                {
+                    "current_price": current_price,
+                    "liquidity_zones": {
+                        "BSL": [z.price for z in retail["liquidity_zones"] if z.zone_type == "BSL"],
+                        "SSL": [z.price for z in retail["liquidity_zones"] if z.zone_type == "SSL"],
+                    },
+                    "fibonacci_zone": fibs["1D"].current_zone.value,
                 },
-                "fibonacci_zone": fibs["1D"].current_zone.value,
-            },
-        )
+                m15_structure=structures["15M"],
+            )
+        else:
+            manip = ManipulationResult(
+                manipulation_type=ManipulationType.NO_MANIPULATION,
+                confidence=0.0,
+                details={
+                    "structure": {},
+                    "volume": {"volume_available": False, "spike": False, "zscore": 0.0},
+                    "momentum": {"ema_up": False, "ema_down": False, "spike": False},
+                    "reason": "m15_analysis_skipped_4h_not_in_ote_or_discount",
+                },
+            )
 
         analysis = AnalysisResults(
             symbol=symbol,
