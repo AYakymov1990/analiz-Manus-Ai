@@ -46,6 +46,9 @@ class StructureAnalysis:
     structure_strength: float
     break_level: float
     confidence: float
+    # Полные списки свингов (для вычисления SSL/BSL относительно S&R зон)
+    all_swing_highs: Optional[List[SwingPoint]] = None
+    all_swing_lows: Optional[List[SwingPoint]] = None
 
 
 @dataclass
@@ -84,6 +87,12 @@ class LiquidityZone:
     strength: float
     estimated_volume: str  # "low", "medium", "high"
     retail_logic: str
+    # Связь с источником (S&R и swing)
+    derived_from_sr_price: Optional[float] = None
+    derived_from_sr_boundaries: Optional[Tuple[float, float]] = None
+    sr_timeframe: Optional[str] = None
+    swing_timestamp: Optional[datetime] = None
+    swing_strength: Optional[float] = None
 
 
 @dataclass

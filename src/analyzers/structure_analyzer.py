@@ -42,11 +42,19 @@ class MultiTimeframeStructureAnalyzer:
                     self.logger.warning("Недостаточно swing точек для %s, используем window extremes fallback", tf)
                     swings = self._get_window_extremes_as_swings(df, tf)
                 analysis = self.determine_structure(swings, tf)
-                results[tf] = self._validate_and_correct(df, analysis)
+                # Сохраняем все свинги в анализ
+                swing_highs = [s for s in swings if s.type == "high"]
+                swing_lows = [s for s in swings if s.type == "low"]
+                validated = self._validate_and_correct(df, analysis)
+                validated.all_swing_highs = swing_highs
+                validated.all_swing_lows = swing_lows
+                results[tf] = validated
             except Exception as ex:
                 self.logger.error("Ошибка анализа %s: %s. Применяем критический fallback.", tf, ex)
                 swings = self._get_window_extremes_as_swings(df, tf)
                 analysis = self.determine_structure(swings, tf)
+                analysis.all_swing_highs = [s for s in swings if s.type == "high"]
+                analysis.all_swing_lows = [s for s in swings if s.type == "low"]
                 results[tf] = analysis
 
         return results

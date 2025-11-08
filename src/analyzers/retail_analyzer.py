@@ -7,6 +7,7 @@ from ..core.data_structures import (
     FibonacciAnalysis,
     FibonacciZone,
     LiquidityZone,
+    SwingPoint,
     StructureAnalysis,
     SupportResistanceLevel,
 )
@@ -23,9 +24,19 @@ class RetailBehaviorAnalyzer:
         data_1d: pd.DataFrame,
         fibonacci: Dict[str, FibonacciAnalysis],
         structures: Dict[str, StructureAnalysis],
+        data_h4: Optional[pd.DataFrame] = None,
     ) -> Dict:
         sr_levels = self.find_support_resistance_levels(data_1d)
         sr_levels = self._inject_structure_levels(sr_levels, structures, fibonacci.get("1D"))
+
+        # Дополнительно: собрать 4H уровни, если передан data_h4
+        if data_h4 is not None:
+            try:
+                sr_h4 = self.find_support_resistance_levels_h4(data_h4, structures)
+                # Объединяем для анализа входа (1D остаются приоритетными в итоговой выдаче)
+                sr_levels = sr_levels + sr_h4
+            except Exception:
+                pass
 
         retail_entry_analysis = self.analyze_retail_entry_probability(
             fibonacci["1D"], sr_levels
@@ -292,31 +303,123 @@ class RetailBehaviorAnalyzer:
     def identify_liquidity_zones(
         self, structures: Dict[str, StructureAnalysis], sr_levels: List[SupportResistanceLevel]
     ) -> List[LiquidityZone]:
+        """
+        SSL/BSL по SMC:
+        - SSL = первый swing low ниже нижней границы support-зоны
+        - BSL = первый swing high выше верхней границы resistance-зоны
+        Приоритет: использовать zone_boundaries у S&R уровней и соответствующий таймфрейм.
+        """
         liquidity_zones: List[LiquidityZone] = []
-        for timeframe, structure in structures.items():
-            if timeframe in ["1D", "4H"]:
-                ssl_price = float(structure.last_swing_low.price) * 0.999
-                liquidity_zones.append(
-                    LiquidityZone(
-                        price=ssl_price,
-                        zone_type="SSL",
-                        strength=structure.structure_strength,
-                        estimated_volume="high" if timeframe == "1D" else "medium",
-                        retail_logic=f"Retail stops placed below {timeframe} swing low at {structure.last_swing_low.price}",
-                    )
-                )
-        for timeframe, structure in structures.items():
-            if timeframe in ["1D", "4H"]:
-                bsl_price = float(structure.last_swing_high.price) * 1.001
-                liquidity_zones.append(
-                    LiquidityZone(
-                        price=bsl_price,
-                        zone_type="BSL",
-                        strength=structure.structure_strength,
-                        estimated_volume="high" if timeframe == "1D" else "medium",
-                        retail_logic=f"Retail stops placed above {timeframe} swing high at {structure.last_swing_high.price}",
-                    )
-                )
-        return liquidity_zones
+        current_price = self._get_current_price(structures)
+
+        for sr in sr_levels:
+            if sr.zone_boundaries is None:
+                continue
+            timeframe = sr.timeframe or "4H"
+            if timeframe not in structures:
+                continue
+            struct = structures[timeframe]
+            swing_highs = struct.all_swing_highs or []
+            swing_lows = struct.all_swing_lows or []
+
+            if sr.level_type == "support":
+                zone = self._find_first_swing_below_support(sr, swing_lows, current_price)
+                if zone:
+                    liquidity_zones.append(zone)
+            elif sr.level_type == "resistance":
+                zone = self._find_first_swing_above_resistance(sr, swing_highs, current_price)
+                if zone:
+                    liquidity_zones.append(zone)
+
+        return self._deduplicate_liquidity_zones(liquidity_zones)
+
+    def _find_first_swing_below_support(
+        self,
+        sr_support: SupportResistanceLevel,
+        swing_lows: List[SwingPoint],
+        current_price: float,
+    ) -> Optional[LiquidityZone]:
+        if sr_support.zone_boundaries is None:
+            return None
+        lower = float(sr_support.zone_boundaries[0])
+        candidates = [sw for sw in swing_lows if float(sw.price) < lower]
+        if not candidates:
+            return None
+        candidates.sort(key=lambda sw: abs(float(sw.price) - lower))
+        max_distance = lower * 0.02  # 2%
+        for sw in candidates:
+            distance = lower - float(sw.price)
+            if distance > max_distance:
+                continue
+            if current_price > 0 and abs(float(sw.price) - current_price) / current_price > 0.15:
+                continue
+            return LiquidityZone(
+                price=float(sw.price),
+                zone_type="SSL",
+                strength=float(sr_support.strength),
+                estimated_volume="high" if (sr_support.obviousness_score or 0.0) > 0.8 else "medium",
+                retail_logic=f"Retail stops below support at {sr_support.price:.6f} (zone: {sr_support.zone_boundaries[0]:.6f}-{sr_support.zone_boundaries[1]:.6f})",
+                derived_from_sr_price=float(sr_support.price),
+                derived_from_sr_boundaries=(float(sr_support.zone_boundaries[0]), float(sr_support.zone_boundaries[1])),
+                sr_timeframe=sr_support.timeframe,
+                swing_timestamp=getattr(sw, "timestamp", None),
+                swing_strength=float(getattr(sw, "strength", 0.0) or 0.0),
+            )
+        return None
+
+    def _find_first_swing_above_resistance(
+        self,
+        sr_resistance: SupportResistanceLevel,
+        swing_highs: List[SwingPoint],
+        current_price: float,
+    ) -> Optional[LiquidityZone]:
+        if sr_resistance.zone_boundaries is None:
+            return None
+        upper = float(sr_resistance.zone_boundaries[1])
+        candidates = [sw for sw in swing_highs if float(sw.price) > upper]
+        if not candidates:
+            return None
+        candidates.sort(key=lambda sw: abs(float(sw.price) - upper))
+        max_distance = upper * 0.02  # 2%
+        for sw in candidates:
+            distance = float(sw.price) - upper
+            if distance > max_distance:
+                continue
+            if current_price > 0 and abs(float(sw.price) - current_price) / current_price > 0.15:
+                continue
+            return LiquidityZone(
+                price=float(sw.price),
+                zone_type="BSL",
+                strength=float(sr_resistance.strength),
+                estimated_volume="high" if (sr_resistance.obviousness_score or 0.0) > 0.8 else "medium",
+                retail_logic=f"Retail stops above resistance at {sr_resistance.price:.6f} (zone: {sr_resistance.zone_boundaries[0]:.6f}-{sr_resistance.zone_boundaries[1]:.6f})",
+                derived_from_sr_price=float(sr_resistance.price),
+                derived_from_sr_boundaries=(float(sr_resistance.zone_boundaries[0]), float(sr_resistance.zone_boundaries[1])),
+                sr_timeframe=sr_resistance.timeframe,
+                swing_timestamp=getattr(sw, "timestamp", None),
+                swing_strength=float(getattr(sw, "strength", 0.0) or 0.0),
+            )
+        return None
+
+    def _get_current_price(self, structures: Dict[str, StructureAnalysis]) -> float:
+        for tf in ["4H", "1D"]:
+            if tf in structures:
+                s = structures[tf]
+                try:
+                    return float(max(float(s.last_swing_high.price), float(s.last_swing_low.price)))
+                except Exception:
+                    continue
+        return 0.0
+
+    def _deduplicate_liquidity_zones(self, zones: List[LiquidityZone]) -> List[LiquidityZone]:
+        if not zones:
+            return []
+        zones_sorted = sorted(zones, key=lambda z: float(z.price))
+        deduped: List[LiquidityZone] = [zones_sorted[0]]
+        for z in zones_sorted[1:]:
+            last = deduped[-1]
+            if abs(float(z.price) - float(last.price)) / max(float(last.price), 1e-9) > 0.001:
+                deduped.append(z)
+        return deduped
 
 
