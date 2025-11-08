@@ -1,7 +1,7 @@
 {
   "metadata": {
     "symbol": "GBPUSD=X",
-    "analysis_timestamp": "2025-11-08T19:51:43.242960",
+    "analysis_timestamp": "2025-11-08T20:15:43.803007",
     "data_windows": {
       "1D": [
         "2025-10-03 00:00:00+00:00",
@@ -94,16 +94,16 @@
       "retail_implications": "retail_likely_to_buy"
     },
     "4h": {
-      "zone": "premium",
-      "retracement": 1.0,
+      "zone": "extension_above",
+      "retracement": 1.4487834798609691,
       "key_levels": {
         "0.0": 1.3096033334732056,
-        "0.236": 1.3111981592178346,
-        "0.382": 1.3121847887039184,
-        "0.5": 1.312982201576233,
-        "0.618": 1.3137796144485474,
-        "0.786": 1.3149149141311645,
-        "1.0": 1.3163610696792603
+        "0.236": 1.3107041368484498,
+        "0.382": 1.311385142326355,
+        "0.5": 1.311935544013977,
+        "0.618": 1.3124859457015992,
+        "0.786": 1.3132695684432982,
+        "1.0": 1.3142677545547485
       },
       "swing_high": 1.3142677545547485,
       "swing_low": 1.3096033334732056
@@ -204,14 +204,6 @@
         "volume": "medium",
         "logic": "Retail stops above 1D resistance (zone: 1.335669-1.338343)",
         "timeframe": "1D"
-      },
-      {
-        "price": 1.3471460342407227,
-        "type": "BSL",
-        "strength": 0.8,
-        "volume": "medium",
-        "logic": "Retail stops above 1D resistance (zone: 1.335669-1.338343)",
-        "timeframe": "1D"
       }
     ],
     "ote_consolidation_4h": {
@@ -260,8 +252,9 @@
   },
   "trade_filter": {
     "1d_direction": "sideways",
-    "4h_zone": "premium",
+    "4h_zone": "extension_above",
     "allowed_directions": [
+      "LONG",
       "SHORT"
     ],
     "reasoning": "1D sideways → trade both directions based on 4H zone"

@@ -1,4 +1,5 @@
 from typing import Dict, Tuple
+import logging
 
 import numpy as np
 import pandas as pd
@@ -10,6 +11,7 @@ class MultiTimeframeFibonacciAnalyzer:
     def __init__(self):
         self.fib_levels = [0.0, 0.236, 0.382, 0.5, 0.618, 0.786, 1.0]
         self.ote_range: Tuple[float, float] = (0.618, 0.786)
+        self.logger = logging.getLogger(__name__)
 
     def analyze_all_timeframes(
         self, structures: Dict[str, StructureAnalysis], current_price: float
@@ -52,22 +54,26 @@ class MultiTimeframeFibonacciAnalyzer:
             range_size = range_high - range_low
             retracement = (range_high - current_price) / range_size
 
-        # Авто-обновление свинга при явной экстензии: подтягиваем границу к текущей цене
-        if retracement > 1.0:
-            if is_bullish and current_price > range_high:
-                range_high = current_price
-                range_size = range_high - range_low
-                retracement = (current_price - range_low) / max(range_size, 1e-12)
-            elif (not is_bullish) and current_price < range_low:
-                range_low = current_price
-                range_size = range_high - range_low
-                retracement = (range_high - current_price) / max(range_size, 1e-12)
+        # Не подтягиваем границы к текущей цене — key_levels синхронизированы со свингами
 
         levels: Dict[str, float] = {}
         for level in self.fib_levels:
             levels[str(level)] = range_low + (range_size * level)
 
         current_zone = self._determine_fibonacci_zone(retracement, is_bullish)
+        # sanity: 1.0 == swing_high, 0.0 == swing_low
+        try:
+            if abs(levels["1.0"] - float(swing_high)) > 1e-9 or abs(levels["0.0"] - float(swing_low)) > 1e-9:
+                self.logger.warning(
+                    "FIB key_levels mismatch | tf=%s | 1.0=%.6f vs swing_high=%.6f | 0.0=%.6f vs swing_low=%.6f",
+                    timeframe,
+                    levels["1.0"],
+                    float(swing_high),
+                    levels["0.0"],
+                    float(swing_low),
+                )
+        except Exception:
+            pass
 
         ote_consolidation = False
         if timeframe == "4H" and current_zone == FibonacciZone.OTE:
