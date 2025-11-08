@@ -1,0 +1,5 @@
+/Users/oleksandrpc/Desktop/my projects/EURUSD/src/analyzers/structure_analyzer.py:94: FutureWarning: Series.fillna with 'method' is deprecated and will raise in a future version. Use obj.ffill() or obj.bfill() instead.
+  atr_series = pd.Series(tr).rolling(window=14, min_periods=1).mean().fillna(method="bfill")
+❌ No 1D swing lows found below support zone — trying full dataset
+❌ No 1D swing lows found below support zone in full dataset
+{"symbol": "GBPUSD=X", "timestamp": "2025-11-08T20:42:07.504816", "setup": "structure_break_wait", "manipulation": "no_manipulation", "fib_1d_zone": "discount"}

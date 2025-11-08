@@ -1,7 +1,7 @@
 {
   "metadata": {
     "symbol": "GBPUSD=X",
-    "analysis_timestamp": "2025-11-08T20:15:43.803007",
+    "analysis_timestamp": "2025-11-08T20:42:07.504816",
     "data_windows": {
       "1D": [
         "2025-10-03 00:00:00+00:00",
@@ -182,6 +182,14 @@
     },
     "liquidity_zones": [
       {
+        "price": 1.2959170913336278,
+        "type": "SSL",
+        "strength": 0.8,
+        "volume": "medium",
+        "logic": "Retail stops below 1D support (calculated from zone: 1.299817-1.302419)",
+        "timeframe": "1D"
+      },
+      {
         "price": 1.301253080368042,
         "type": "SSL",
         "strength": 0.7,
@@ -260,7 +268,7 @@
     "reasoning": "1D sideways → trade both directions based on 4H zone"
   },
   "manus_ai_questions": [
-    "Should we execute counter-trend SSL hunt to 1.301253080368042 or wait for trend continuation?",
+    "Should we execute counter-trend SSL hunt to 1.2959170913336278 or wait for trend continuation?",
     "What is the optimal entry timing given current discount and no_manipulation?",
     "How should we manage risk in this non_extension with bullish_retail_interest?",
     "What is the primary target: SSL hunt or structure continuation?"

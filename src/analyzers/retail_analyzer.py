@@ -372,7 +372,8 @@ class RetailBehaviorAnalyzer:
             if df is None or len(df) < 5:
                 return base
             # используем последние 300 свечей для более широкого анализа
-            df_use = df.tail(300) if len(df) > 300 else df
+            window = 1000 if tf == "1D" else 300
+            df_use = df.tail(window) if len(df) > window else df
             extra = self._extract_local_extrema(df_use, want_type, boundary, pivot_span=2, tf=tf)
             # merge by price proximity 0.0005 (≈5e-4 ~ 5e-4 absolute)
             for sp in extra:
@@ -386,6 +387,19 @@ class RetailBehaviorAnalyzer:
             lower = float(key_sr_levels.d1_support.zone_boundaries[0])
             upper = float(key_sr_levels.d1_support.zone_boundaries[1])
             src_1d = data_1d_full if data_1d_full is not None else data_1d
+            # Диагностика источников данных
+            try:
+                self.logger.info("data_1d: %s", f"{len(data_1d)} candles" if data_1d is not None else "None")
+                self.logger.info("data_1d_full: %s", f"{len(data_1d_full)} candles" if data_1d_full is not None else "None")
+                if src_1d is not None and len(src_1d) > 0:
+                    min_300 = float(src_1d.tail(300)["Low"].min()) if len(src_1d) >= 300 else float(src_1d["Low"].min())
+                    min_1000 = float(src_1d.tail(1000)["Low"].min()) if len(src_1d) >= 1000 else min_300
+                    min_all = float(src_1d["Low"].min())
+                    self.logger.info("Min price: 300d=%.6f, 1000d=%.6f, all=%.6f", min_300, min_1000, min_all)
+                    self.logger.info("Support lower boundary: %.6f | below: 300d=%s, 1000d=%s, all=%s",
+                                     lower, str(min_300 < lower), str(min_1000 < lower), str(min_all < lower))
+            except Exception:
+                pass
             swing_lows = _aug(struct.all_swing_lows or [], src_1d, "low", lower, "1D")
             self.logger.info("1D Support zone: [%s, %s]", f"{lower:.6f}", f"{upper:.6f}")
             self.logger.info("Found %d 1D swing lows total", len(swing_lows))
@@ -428,7 +442,63 @@ class RetailBehaviorAnalyzer:
                             dist_bound_ratio * 100.0,
                         )
                 else:
-                    self.logger.warning("❌ No 1D swing lows found below support zone")
+                    self.logger.warning("❌ No 1D swing lows found below support zone — trying full dataset")
+                    # Попытка по всему доступному датасету (если _aug ограничил окно)
+                    try:
+                        if src_1d is not None and len(src_1d) > 0:
+                            all_lows = self._extract_local_extrema(src_1d, "low", lower, pivot_span=2, tf="1D")
+                            below_full = [sp for sp in all_lows if float(sp.price) < lower]
+                            self.logger.info("Full dataset swing lows below zone: %d", len(below_full))
+                            if below_full:
+                                nearest = max(below_full, key=lambda sp: float(sp.price))
+                                dist_curr = abs(float(nearest.price) - runtime_current) / max(runtime_current, 1e-9)
+                                min_bound_ratio = 0.001
+                                dist_bound_ratio = (lower - float(nearest.price)) / max(lower, 1e-9)
+                                if dist_curr <= 0.20 and dist_bound_ratio >= min_bound_ratio:
+                                    self.logger.info("✅ 1D SSL added (full): %.6f", float(nearest.price))
+                                    liquidity_zones.append(
+                                        LiquidityZone(
+                                            price=float(nearest.price),
+                                            zone_type="SSL",
+                                            strength=float(key_sr_levels.d1_support.strength),
+                                            estimated_volume="high" if float(key_sr_levels.d1_support.obviousness_score) > 0.8 else "medium",
+                                            retail_logic=f"Retail stops below 1D support (zone: {lower:.6f}-{upper:.6f})",
+                                            timeframe="1D",
+                                            derived_from_sr_boundaries=(float(key_sr_levels.d1_support.zone_boundaries[0]), float(key_sr_levels.d1_support.zone_boundaries[1])),
+                                            sr_timeframe="1D",
+                                            swing_timestamp=getattr(nearest, "timestamp", None),
+                                            swing_strength=float(getattr(nearest, "strength", 0.0) or 0.0),
+                                        )
+                                    )
+                                else:
+                                    self.logger.warning("❌ 1D SSL (full) rejected by distance constraints")
+                            else:
+                                self.logger.warning("❌ No 1D swing lows found below support zone in full dataset")
+                    except Exception:
+                        pass
+                    # Если и после full ничего — расчётный SSL
+                    if not any(z.zone_type == "SSL" and z.timeframe == "1D" for z in liquidity_zones):
+                        ssl_price = lower * 0.997  # -0.3%
+                        dist_curr = abs(ssl_price - runtime_current) / max(runtime_current, 1e-9)
+                        dist_bound_ratio = (lower - ssl_price) / max(lower, 1e-9)
+                        if dist_curr <= 0.20 and dist_bound_ratio >= 0.001:
+                            self.logger.info("✅ 1D SSL added (calculated): %.6f", ssl_price)
+                            liquidity_zones.append(
+                                LiquidityZone(
+                                    price=float(ssl_price),
+                                    zone_type="SSL",
+                                    strength=float(key_sr_levels.d1_support.strength),
+                                    estimated_volume="high" if float(key_sr_levels.d1_support.obviousness_score) > 0.8 else "medium",
+                                    retail_logic=f"Retail stops below 1D support (calculated from zone: {lower:.6f}-{upper:.6f})",
+                                    timeframe="1D",
+                                    derived_from_sr_boundaries=(float(key_sr_levels.d1_support.zone_boundaries[0]), float(key_sr_levels.d1_support.zone_boundaries[1])),
+                                    sr_timeframe="1D",
+                                    swing_timestamp=None,
+                                    swing_strength=0.0,
+                                )
+                            )
+                        else:
+                            self.logger.warning("❌ Calculated 1D SSL rejected by distance constraints")
         # 1D resistance -> все BSL
         if key_sr_levels.d1_resistance and "1D" in structures:
             struct = structures["1D"]
@@ -877,6 +947,21 @@ class RetailBehaviorAnalyzer:
             deduplicated.extend(filtered)
         # Сортировка обратно по цене
         deduplicated.sort(key=lambda z: float(z.price))
+        # Гарантировать максимум 1 1D SSL — оставим ближайший к границе SR
+        try:
+            one_d_ssl = [z for z in deduplicated if getattr(z, "zone_type", "") == "SSL" and getattr(z, "timeframe", "") == "1D"]
+            if len(one_d_ssl) > 1:
+                def _dist_to_low_boundary(q: LiquidityZone) -> float:
+                    b = getattr(q, "derived_from_sr_boundaries", None)
+                    if not b:
+                        return float("inf")
+                    return abs(float(q.price) - float(b[0]))
+                keep = min(one_d_ssl, key=_dist_to_low_boundary)
+                deduplicated = [z for z in deduplicated if not (getattr(z, "zone_type", "") == "SSL" and getattr(z, "timeframe", "") == "1D")]
+                deduplicated.append(keep)
+                deduplicated.sort(key=lambda z: float(z.price))
+        except Exception:
+            pass
         return deduplicated
 
 
