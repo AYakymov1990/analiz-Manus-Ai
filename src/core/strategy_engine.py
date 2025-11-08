@@ -59,14 +59,20 @@ class TradingAnalyzer:
         raw.index = pd.to_datetime(raw.index)
 
         data_m15 = raw.copy()
-        data_h4 = self._resample(raw, "4h")
-        data_1d = self._resample(raw, "1D")
+        data_h4_full = self._resample(raw, "4h")
+        data_1d_full = self._resample(raw, "1D")
 
         # окна анализа
-        win_1d = data_1d.loc[data_1d.index >= data_1d.index[-1] - pd.Timedelta(days=35)]
-        win_4h = data_h4.loc[data_h4.index >= data_h4.index[-1] - pd.Timedelta(days=14)]
+        win_1d = data_1d_full.loc[data_1d_full.index >= data_1d_full.index[-1] - pd.Timedelta(days=35)]
+        win_4h = data_h4_full.loc[data_h4_full.index >= data_h4_full.index[-1] - pd.Timedelta(days=14)]
 
-        return {"1D": win_1d, "4H": win_4h, "15M": data_m15}
+        return {
+            "1D": win_1d,
+            "4H": win_4h,
+            "15M": data_m15,
+            "1D_FULL": data_1d_full,
+            "4H_FULL": data_h4_full,
+        }
 
     def analyze(self, symbol: str, save_output: bool = True) -> Dict[str, Any]:
         data = self._load_and_validate_data(symbol)
@@ -74,7 +80,15 @@ class TradingAnalyzer:
 
         structures = self.structure_analyzer.analyze_all_timeframes(data["1D"], data["4H"], data["15M"]) 
         fibs = self.fibonacci_analyzer.analyze_all_timeframes(structures, current_price)
-        retail = self.retail_analyzer.analyze_retail_behavior(data["1D"], fibs, structures, data_h4=data["4H"])
+        retail = self.retail_analyzer.analyze_retail_behavior(
+            data["1D"],
+            fibs,
+            structures,
+            data_h4=data["4H"],
+            current_price=current_price,
+            data_h4_extended=data.get("4H_FULL"),
+            data_1d_extended=data.get("1D_FULL"),
+        )
         # Добавим 4H уровни S/R (SMC) в ретейл-контекст для приоритетного вывода
         try:
             retail["support_resistance_levels_h4"] = self.retail_analyzer.find_support_resistance_levels_h4(

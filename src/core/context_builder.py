@@ -157,11 +157,8 @@ def build_manus_context(symbol: str, analysis_results: AnalysisResults) -> Dict[
         },
         "retail_behavior": {
             "sentiment": retail_sentiment,
-            # Новый компактный формат — 4 ключевых уровня (если есть)
+            # Новый компактный формат — 4 ключевых уровня (без дублирующих массивов)
             **({"key_sr_levels": key_sr_levels_dict} if key_sr_levels_dict else {}),
-            # Сохраняем старые поля для обратной совместимости
-            "support_resistance_4h": [_serialize_sr_level(x) for x in sr_levels_h4],
-            "support_resistance_1d": [_serialize_sr_level(x) for x in sr_levels],
             "liquidity_zones": [_serialize_liquidity_zone(z) for z in liq_zones],
             "vulnerability_assessment": {
                 "near_support": bool(retail_entry.get("nearby_support")),

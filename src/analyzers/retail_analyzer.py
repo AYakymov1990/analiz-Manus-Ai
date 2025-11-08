@@ -27,6 +27,9 @@ class RetailBehaviorAnalyzer:
         fibonacci: Dict[str, FibonacciAnalysis],
         structures: Dict[str, StructureAnalysis],
         data_h4: Optional[pd.DataFrame] = None,
+        current_price: Optional[float] = None,
+        data_h4_extended: Optional[pd.DataFrame] = None,
+        data_1d_extended: Optional[pd.DataFrame] = None,
     ) -> Dict:
         # 1) Собрать уровни для 1D
         sr_levels_1d = self.find_support_resistance_levels(data_1d)
@@ -41,16 +44,24 @@ class RetailBehaviorAnalyzer:
                 pass
 
         # 3) Выбрать 4 ключевых уровня
-        current_price = self._get_current_price(structures)
-        key_sr_levels = self.select_key_sr_levels(sr_levels_1d, sr_levels_4h, current_price)
+        runtime_current = float(current_price) if current_price is not None else self._get_current_price(structures)
+        key_sr_levels = self.select_key_sr_levels(sr_levels_1d, sr_levels_4h, runtime_current)
 
         # 4) Retail entry анализ (можно использовать полный набор уровней)
         retail_entry_analysis = self.analyze_retail_entry_probability(
             fibonacci["1D"], sr_levels_1d + sr_levels_4h
         )
 
-        # 5) SSL/BSL только от 4 ключевых уровней
-        liquidity_zones = self.identify_liquidity_zones_from_key_levels(structures, key_sr_levels)
+        # 5) SSL/BSL только от 4 ключевых уровней (с учётом текущей цены и сырых данных TF)
+        liquidity_zones = self.identify_liquidity_zones_from_key_levels(
+            structures,
+            key_sr_levels,
+            data_h4=data_h4,
+            data_1d=data_1d,
+            current_price=runtime_current,
+            data_h4_full=data_h4_extended,
+            data_1d_full=data_1d_extended,
+        )
 
         return {
             "support_resistance_levels": sr_levels_1d,  # оставляем для обратной совместимости (1D)
@@ -342,36 +353,97 @@ class RetailBehaviorAnalyzer:
         self,
         structures: Dict[str, StructureAnalysis],
         key_sr_levels: KeySRLevels,
+        data_h4: Optional[pd.DataFrame] = None,
+        data_1d: Optional[pd.DataFrame] = None,
+        current_price: Optional[float] = None,
+        data_h4_full: Optional[pd.DataFrame] = None,
+        data_1d_full: Optional[pd.DataFrame] = None,
     ) -> List[LiquidityZone]:
         liquidity_zones: List[LiquidityZone] = []
-        current_price = self._get_current_price(structures)
+        runtime_current = float(current_price) if current_price is not None else self._get_current_price(structures)
 
-        # 1D support -> SSL
+        # helper to augment swings with raw pivots
+        def _aug(swings: List[SwingPoint], df: Optional[pd.DataFrame], want_type: str, boundary: float, tf: str) -> List[SwingPoint]:
+            base = list(swings or [])
+            if df is None or len(df) < 5:
+                return base
+            # используем последние 300 свечей для более широкого анализа
+            df_use = df.tail(300) if len(df) > 300 else df
+            extra = self._extract_local_extrema(df, want_type, boundary, pivot_span=2, tf=tf)
+            # merge by price proximity 0.0005 (≈5e-4 ~ 5e-4 absolute)
+            for sp in extra:
+                if not any(abs(float(sp.price) - float(x.price)) / max(abs(float(sp.price)), 1e-9) < 5e-4 for x in base):
+                    base.append(sp)
+            return base
+
+        # 1D support -> все SSL (потом ограничим количеством)
         if key_sr_levels.d1_support and "1D" in structures:
             struct = structures["1D"]
-            zone = self._find_ssl_from_key_level(key_sr_levels.d1_support, struct.all_swing_lows or [], current_price, "1D")
-            if zone:
-                liquidity_zones.append(zone)
-        # 1D resistance -> BSL
+            lower = float(key_sr_levels.d1_support.zone_boundaries[0])
+            src_1d = data_1d_full if data_1d_full is not None else data_1d
+            swing_lows = _aug(struct.all_swing_lows or [], src_1d, "low", lower, "1D")
+            zones = self._find_all_ssl_from_key_level(key_sr_levels.d1_support, swing_lows, runtime_current, "1D")
+            # оставить ближайшие 2 к границе
+            zones.sort(key=lambda z: abs(float(z.price) - lower))
+            liquidity_zones.extend(zones[:2])
+        # 1D resistance -> все BSL
         if key_sr_levels.d1_resistance and "1D" in structures:
             struct = structures["1D"]
-            zone = self._find_bsl_from_key_level(key_sr_levels.d1_resistance, struct.all_swing_highs or [], current_price, "1D")
-            if zone:
-                liquidity_zones.append(zone)
-        # 4H support -> SSL
+            upper = float(key_sr_levels.d1_resistance.zone_boundaries[1])
+            src_1d = data_1d_full if data_1d_full is not None else data_1d
+            swing_highs = _aug(struct.all_swing_highs or [], src_1d, "high", upper, "1D")
+            zones = self._find_all_bsl_from_key_level(key_sr_levels.d1_resistance, swing_highs, runtime_current, "1D")
+            zones.sort(key=lambda z: abs(float(z.price) - upper))
+            liquidity_zones.extend(zones[:2])
+        # 4H support -> все SSL (ограничить ближайшей 1)
         if key_sr_levels.h4_support and "4H" in structures:
             struct = structures["4H"]
-            zone = self._find_ssl_from_key_level(key_sr_levels.h4_support, struct.all_swing_lows or [], current_price, "4H")
-            if zone:
-                liquidity_zones.append(zone)
-        # 4H resistance -> BSL
+            lower = float(key_sr_levels.h4_support.zone_boundaries[0])
+            src_h4 = data_h4_full if data_h4_full is not None else data_h4
+            swing_lows = _aug(struct.all_swing_lows or [], src_h4, "low", lower, "4H")
+            zones = self._find_all_ssl_from_key_level(key_sr_levels.h4_support, swing_lows, runtime_current, "4H")
+            zones.sort(key=lambda z: abs(float(z.price) - lower))
+            liquidity_zones.extend(zones[:1])
+        # 4H resistance -> все BSL (ограничить ближайшей 1)
         if key_sr_levels.h4_resistance and "4H" in structures:
             struct = structures["4H"]
-            zone = self._find_bsl_from_key_level(key_sr_levels.h4_resistance, struct.all_swing_highs or [], current_price, "4H")
-            if zone:
-                liquidity_zones.append(zone)
+            upper = float(key_sr_levels.h4_resistance.zone_boundaries[1])
+            src_h4 = data_h4_full if data_h4_full is not None else data_h4
+            swing_highs = _aug(struct.all_swing_highs or [], src_h4, "high", upper, "4H")
+            zones = self._find_all_bsl_from_key_level(key_sr_levels.h4_resistance, swing_highs, runtime_current, "4H")
+            zones.sort(key=lambda z: abs(float(z.price) - upper))
+            liquidity_zones.extend(zones[:1])
 
         return self._deduplicate_liquidity_zones(liquidity_zones)
+
+    def _extract_local_extrema(
+        self,
+        df: pd.DataFrame,
+        want_type: str,
+        boundary: float,
+        pivot_span: int,
+        tf: str,
+    ) -> List[SwingPoint]:
+        res: List[SwingPoint] = []
+        n = len(df)
+        for i in range(pivot_span, n - pivot_span):
+            if want_type == "low":
+                val = float(df.iloc[i]["Low"])
+                if not (val < float(boundary)):
+                    continue
+                left = float(df.iloc[i - pivot_span : i]["Low"].min())
+                right = float(df.iloc[i + 1 : i + 1 + pivot_span]["Low"].min())
+                if val <= left and val <= right:
+                    res.append(SwingPoint(timestamp=df.index[i], price=val, type="low", timeframe=tf, strength=0.5))
+            else:
+                val = float(df.iloc[i]["High"])
+                if not (val > float(boundary)):
+                    continue
+                left = float(df.iloc[i - pivot_span : i]["High"].max())
+                right = float(df.iloc[i + 1 : i + 1 + pivot_span]["High"].max())
+                if val >= left and val >= right:
+                    res.append(SwingPoint(timestamp=df.index[i], price=val, type="high", timeframe=tf, strength=0.5))
+        return res
 
     def _find_ssl_from_key_level(
         self,
@@ -384,14 +456,30 @@ class RetailBehaviorAnalyzer:
         candidates = [sw for sw in swing_lows if float(sw.price) < lower]
         if not candidates:
             return None
+        # SSL должен быть ниже текущей цены
+        if current_price > 0:
+            candidates = [sw for sw in candidates if float(sw.price) < current_price]
+            if not candidates:
+                return None
         candidates.sort(key=lambda sw: abs(float(sw.price) - lower))
-        max_distance = lower * 0.02
+        max_distance = lower * (0.05 if timeframe == "1D" else 0.02)
+        min_curr_ratio = 0.002 if timeframe == "1D" else 0.001  # 0.2% для 1D, 0.1% для 4H
+        min_bound_ratio = 0.001 if timeframe == "1D" else 0.0005  # 0.1% для 1D, 0.05% для 4H
         for sw in candidates:
             distance = lower - float(sw.price)
             if distance > max_distance:
                 continue
-            if current_price > 0 and abs(float(sw.price) - current_price) / current_price > 0.15:
-                continue
+            if current_price > 0:
+                dist_curr = abs(float(sw.price) - current_price) / current_price
+                max_curr = 0.20 if timeframe == "1D" else 0.15
+                # нижняя граница по расстоянию от текущей цены
+                if dist_curr < min_curr_ratio or dist_curr > max_curr:
+                    continue
+            # нижняя граница по отступу от границы зоны
+            if lower > 0:
+                dist_bound = distance / lower
+                if dist_bound < min_bound_ratio:
+                    continue
             return LiquidityZone(
                 price=float(sw.price),
                 zone_type="SSL",
@@ -416,14 +504,28 @@ class RetailBehaviorAnalyzer:
         candidates = [sw for sw in swing_highs if float(sw.price) > upper]
         if not candidates:
             return None
+        # BSL должен быть выше текущей цены
+        if current_price > 0:
+            candidates = [sw for sw in candidates if float(sw.price) > current_price]
+            if not candidates:
+                return None
         candidates.sort(key=lambda sw: abs(float(sw.price) - upper))
-        max_distance = upper * 0.02
+        max_distance = upper * (0.05 if timeframe == "1D" else 0.02)
+        min_curr_ratio = 0.002 if timeframe == "1D" else 0.001
+        min_bound_ratio = 0.001 if timeframe == "1D" else 0.0005
         for sw in candidates:
             distance = float(sw.price) - upper
             if distance > max_distance:
                 continue
-            if current_price > 0 and abs(float(sw.price) - current_price) / current_price > 0.15:
-                continue
+            if current_price > 0:
+                dist_curr = abs(float(sw.price) - current_price) / current_price
+                max_curr = 0.20 if timeframe == "1D" else 0.15
+                if dist_curr < min_curr_ratio or dist_curr > max_curr:
+                    continue
+            if upper > 0:
+                dist_bound = distance / upper
+                if dist_bound < min_bound_ratio:
+                    continue
             return LiquidityZone(
                 price=float(sw.price),
                 zone_type="BSL",
@@ -436,6 +538,98 @@ class RetailBehaviorAnalyzer:
                 swing_strength=float(getattr(sw, "strength", 0.0) or 0.0),
             )
         return None
+
+    def _find_all_ssl_from_key_level(
+        self,
+        key_level: KeySRLevel,
+        swing_lows: List[SwingPoint],
+        current_price: float,
+        timeframe: str,
+    ) -> List[LiquidityZone]:
+        lower = float(key_level.zone_boundaries[0])
+        candidates = [sw for sw in swing_lows if float(sw.price) < lower]
+        if not candidates:
+            return []
+        if current_price > 0:
+            candidates = [sw for sw in candidates if float(sw.price) < current_price]
+            if not candidates:
+                return []
+        candidates.sort(key=lambda sw: abs(float(sw.price) - lower))
+        max_distance = lower * (0.05 if timeframe == "1D" else 0.02)
+        min_curr_ratio = 0.002 if timeframe == "1D" else 0.001
+        min_bound_ratio = 0.001 if timeframe == "1D" else 0.0005
+        zones: List[LiquidityZone] = []
+        for sw in candidates:
+            distance = lower - float(sw.price)
+            if distance > max_distance:
+                continue
+            if current_price > 0:
+                dist_curr = abs(float(sw.price) - current_price) / current_price
+                max_curr = 0.20 if timeframe == "1D" else 0.15
+                if dist_curr < min_curr_ratio or dist_curr > max_curr:
+                    continue
+            if lower > 0:
+                dist_bound = distance / lower
+                if dist_bound < min_bound_ratio:
+                    continue
+            zones.append(LiquidityZone(
+                price=float(sw.price),
+                zone_type="SSL",
+                strength=float(key_level.strength),
+                estimated_volume="high" if float(key_level.obviousness_score) > 0.8 else "medium",
+                retail_logic=f"Retail stops below {timeframe} support (zone: {key_level.zone_boundaries[0]:.6f}-{key_level.zone_boundaries[1]:.6f})",
+                derived_from_sr_boundaries=(float(key_level.zone_boundaries[0]), float(key_level.zone_boundaries[1])),
+                sr_timeframe=timeframe,
+                swing_timestamp=getattr(sw, "timestamp", None),
+                swing_strength=float(getattr(sw, "strength", 0.0) or 0.0),
+            ))
+        return zones
+
+    def _find_all_bsl_from_key_level(
+        self,
+        key_level: KeySRLevel,
+        swing_highs: List[SwingPoint],
+        current_price: float,
+        timeframe: str,
+    ) -> List[LiquidityZone]:
+        upper = float(key_level.zone_boundaries[1])
+        candidates = [sw for sw in swing_highs if float(sw.price) > upper]
+        if not candidates:
+            return []
+        if current_price > 0:
+            candidates = [sw for sw in candidates if float(sw.price) > current_price]
+            if not candidates:
+                return []
+        candidates.sort(key=lambda sw: abs(float(sw.price) - upper))
+        max_distance = upper * (0.05 if timeframe == "1D" else 0.02)
+        min_curr_ratio = 0.002 if timeframe == "1D" else 0.001
+        min_bound_ratio = 0.001 if timeframe == "1D" else 0.0005
+        zones: List[LiquidityZone] = []
+        for sw in candidates:
+            distance = float(sw.price) - upper
+            if distance > max_distance:
+                continue
+            if current_price > 0:
+                dist_curr = abs(float(sw.price) - current_price) / current_price
+                max_curr = 0.20 if timeframe == "1D" else 0.15
+                if dist_curr < min_curr_ratio or dist_curr > max_curr:
+                    continue
+            if upper > 0:
+                dist_bound = distance / upper
+                if dist_bound < min_bound_ratio:
+                    continue
+            zones.append(LiquidityZone(
+                price=float(sw.price),
+                zone_type="BSL",
+                strength=float(key_level.strength),
+                estimated_volume="high" if float(key_level.obviousness_score) > 0.8 else "medium",
+                retail_logic=f"Retail stops above {timeframe} resistance (zone: {key_level.zone_boundaries[0]:.6f}-{key_level.zone_boundaries[1]:.6f})",
+                derived_from_sr_boundaries=(float(key_level.zone_boundaries[0]), float(key_level.zone_boundaries[1])),
+                sr_timeframe=timeframe,
+                swing_timestamp=getattr(sw, "timestamp", None),
+                swing_strength=float(getattr(sw, "strength", 0.0) or 0.0),
+            ))
+        return zones
 
     def _assess_retail_likelihood(self, level_price: float, level_type: str) -> bool:
         return level_type == "support"
@@ -589,11 +783,25 @@ class RetailBehaviorAnalyzer:
         if not zones:
             return []
         zones_sorted = sorted(zones, key=lambda z: float(z.price))
-        deduped: List[LiquidityZone] = [zones_sorted[0]]
-        for z in zones_sorted[1:]:
-            last = deduped[-1]
-            if abs(float(z.price) - float(last.price)) / max(float(last.price), 1e-9) > 0.001:
+        deduped: List[LiquidityZone] = []
+        tol = 0.001  # 0.1%
+        for z in zones_sorted:
+            if not deduped:
                 deduped.append(z)
+                continue
+            last = deduped[-1]
+            close = abs(float(z.price) - float(last.price)) / max(float(last.price), 1e-9) <= tol
+            if not close:
+                deduped.append(z)
+                continue
+            # При близких ценах — предпочитаем 4H над 1D
+            last_tf = getattr(last, "sr_timeframe", None)
+            z_tf = getattr(z, "sr_timeframe", None)
+            def _rank(tf: Optional[str]) -> int:
+                return 2 if tf == "4H" else (1 if tf == "1D" else 0)
+            if _rank(z_tf) > _rank(last_tf):
+                deduped[-1] = z
+            # иначе оставляем last
         return deduped
 
 
