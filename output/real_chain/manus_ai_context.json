@@ -1,7 +1,7 @@
 {
   "metadata": {
     "symbol": "GBPUSD=X",
-    "analysis_timestamp": "2025-11-08T11:59:36.324149",
+    "analysis_timestamp": "2025-11-08T12:50:02.642353",
     "data_windows": {
       "1D": [
         "2025-10-03 00:00:00+00:00",
@@ -126,6 +126,60 @@
   },
   "retail_behavior": {
     "sentiment": "bullish_retail_interest",
+    "key_sr_levels": {
+      "1D": {
+        "support": {
+          "zone_boundaries": [
+            1.2998165409564972,
+            1.3024187762737274
+          ],
+          "strength": 0.8,
+          "obviousness_score": 0.7,
+          "touches": 3,
+          "last_touch": "2025-11-05T00:00:00+00:00",
+          "reaction_strengths": null,
+          "time_separation_hours": null
+        },
+        "resistance": {
+          "zone_boundaries": [
+            1.3356686096191406,
+            1.3383426208496092
+          ],
+          "strength": 0.8,
+          "obviousness_score": 0.7,
+          "touches": 3,
+          "last_touch": "2025-10-28T00:00:00+00:00",
+          "reaction_strengths": null,
+          "time_separation_hours": null
+        }
+      },
+      "4H": {
+        "support": {
+          "zone_boundaries": [
+            1.3082937301397324,
+            1.3109129368066785
+          ],
+          "strength": 0.7,
+          "obviousness_score": 0.7,
+          "touches": 3,
+          "last_touch": "2025-11-07T08:00:00+00:00",
+          "reaction_strengths": null,
+          "time_separation_hours": null
+        },
+        "resistance": {
+          "zone_boundaries": [
+            1.3129534868001937,
+            1.315582022309303
+          ],
+          "strength": 0.7,
+          "obviousness_score": 0.7,
+          "touches": 3,
+          "last_touch": "2025-11-06T16:00:00+00:00",
+          "reaction_strengths": null,
+          "time_separation_hours": null
+        }
+      }
+    },
     "support_resistance_4h": [
       {
         "price": 1.3155953288078308,
@@ -207,57 +261,6 @@
         ],
         "obviousness_score": 0.7,
         "last_touch": "2025-10-28T00:00:00+00:00"
-      },
-      {
-        "price": 1.3155953288078308,
-        "touches": 3,
-        "strength": 0.5800000000000001,
-        "type": "resistance",
-        "retail_likely": false,
-        "timeframe": "4H",
-        "zone_boundaries": [
-          1.3142677545547485,
-          1.3164650201797485
-        ],
-        "obviousness_score": 1.0,
-        "last_touch": "2025-11-03T20:00:00+00:00",
-        "reaction_strengths": [
-          0.0035375356674194336,
-          0.00273895263671875,
-          0.007718324661254883
-        ],
-        "time_separation": [
-          56.0,
-          16.0
-        ]
-      },
-      {
-        "price": 1.3096033334732056,
-        "touches": 3,
-        "strength": 0.7,
-        "type": "support",
-        "retail_likely": true,
-        "timeframe": "4H",
-        "zone_boundaries": [
-          1.3082937301397324,
-          1.3109129368066785
-        ],
-        "obviousness_score": 0.7,
-        "last_touch": "2025-11-07T08:00:00+00:00"
-      },
-      {
-        "price": 1.3142677545547485,
-        "touches": 3,
-        "strength": 0.7,
-        "type": "resistance",
-        "retail_likely": true,
-        "timeframe": "4H",
-        "zone_boundaries": [
-          1.3129534868001937,
-          1.315582022309303
-        ],
-        "obviousness_score": 0.7,
-        "last_touch": "2025-11-06T16:00:00+00:00"
       }
     ],
     "liquidity_zones": [
@@ -266,28 +269,21 @@
         "type": "SSL",
         "strength": 0.7,
         "volume": "medium",
-        "logic": "Retail stops below support at 1.309603 (zone: 1.308294-1.310913)"
+        "logic": "Retail stops below 4H support (zone: 1.308294-1.310913)"
       },
       {
         "price": 1.316239833831787,
         "type": "BSL",
         "strength": 0.7,
         "volume": "medium",
-        "logic": "Retail stops above resistance at 1.314268 (zone: 1.312953-1.315582)"
-      },
-      {
-        "price": 1.3218421936035156,
-        "type": "BSL",
-        "strength": 0.5800000000000001,
-        "volume": "high",
-        "logic": "Retail stops above resistance at 1.315595 (zone: 1.314268-1.316465)"
+        "logic": "Retail stops above 4H resistance (zone: 1.312953-1.315582)"
       },
       {
         "price": 1.3443208932876587,
         "type": "BSL",
         "strength": 0.8,
         "volume": "medium",
-        "logic": "Retail stops above resistance at 1.337006 (zone: 1.335669-1.338343)"
+        "logic": "Retail stops above 1D resistance (zone: 1.335669-1.338343)"
       }
     ],
     "vulnerability_assessment": {

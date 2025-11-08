@@ -9,6 +9,8 @@ from .data_structures import (
     FibonacciAnalysis,
     SupportResistanceLevel,
     LiquidityZone,
+    KeySRLevel,
+    KeySRLevels,
 )
 
 
@@ -121,6 +123,7 @@ def build_manus_context(symbol: str, analysis_results: AnalysisResults) -> Dict[
     sr_levels = analysis_results.retail.get("support_resistance_levels", [])
     liq_zones = analysis_results.retail.get("liquidity_zones", [])
     retail_entry = analysis_results.retail.get("retail_entry_analysis", {})
+    key_sr_levels_dict = analysis_results.retail.get("key_sr_levels")
 
     # Choose SSL target (min SSL) for question formatting
     ssl_targets = [z.price for z in liq_zones if getattr(z, "zone_type", "") == "SSL"]
@@ -154,6 +157,9 @@ def build_manus_context(symbol: str, analysis_results: AnalysisResults) -> Dict[
         },
         "retail_behavior": {
             "sentiment": retail_sentiment,
+            # Новый компактный формат — 4 ключевых уровня (если есть)
+            **({"key_sr_levels": key_sr_levels_dict} if key_sr_levels_dict else {}),
+            # Сохраняем старые поля для обратной совместимости
             "support_resistance_4h": [_serialize_sr_level(x) for x in sr_levels_h4],
             "support_resistance_1d": [_serialize_sr_level(x) for x in sr_levels],
             "liquidity_zones": [_serialize_liquidity_zone(z) for z in liq_zones],

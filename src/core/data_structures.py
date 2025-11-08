@@ -96,6 +96,53 @@ class LiquidityZone:
 
 
 @dataclass
+class KeySRLevel:
+    """
+    Ключевой S&R уровень (без поля price, только границы зоны).
+    """
+    zone_boundaries: Tuple[float, float]
+    strength: float
+    obviousness_score: float
+    touches: int
+    last_touch: Optional[str] = None
+    reaction_strengths: Optional[List[float]] = None
+    time_separation_hours: Optional[List[float]] = None
+
+
+@dataclass
+class KeySRLevels:
+    """
+    Контейнер 4 ключевых уровней: 1D.support/resistance и 4H.support/resistance.
+    """
+    d1_support: Optional[KeySRLevel] = None
+    d1_resistance: Optional[KeySRLevel] = None
+    h4_support: Optional[KeySRLevel] = None
+    h4_resistance: Optional[KeySRLevel] = None
+
+    def to_dict(self) -> Dict[str, Dict[str, Optional[Dict]]]:
+        return {
+            "1D": {
+                "support": self._level_to_dict(self.d1_support) if self.d1_support else None,
+                "resistance": self._level_to_dict(self.d1_resistance) if self.d1_resistance else None,
+            },
+            "4H": {
+                "support": self._level_to_dict(self.h4_support) if self.h4_support else None,
+                "resistance": self._level_to_dict(self.h4_resistance) if self.h4_resistance else None,
+            },
+        }
+
+    def _level_to_dict(self, level: KeySRLevel) -> Dict:
+        return {
+            "zone_boundaries": [float(level.zone_boundaries[0]), float(level.zone_boundaries[1])],
+            "strength": float(level.strength),
+            "obviousness_score": float(level.obviousness_score),
+            "touches": int(level.touches),
+            "last_touch": level.last_touch,
+            "reaction_strengths": [float(x) for x in (level.reaction_strengths or [])] if level.reaction_strengths else None,
+            "time_separation_hours": [float(x) for x in (level.time_separation_hours or [])] if level.time_separation_hours else None,
+        }
+
+@dataclass
 class SetupAnalysis:
     setup_type: SetupType
     trade_direction: str  # "long" or "short"

@@ -10,6 +10,8 @@ from ..core.data_structures import (
     SwingPoint,
     StructureAnalysis,
     SupportResistanceLevel,
+    KeySRLevel,
+    KeySRLevels,
 )
 from .smc_sr_detector import SmartMoneySRDetector
 
@@ -26,29 +28,102 @@ class RetailBehaviorAnalyzer:
         structures: Dict[str, StructureAnalysis],
         data_h4: Optional[pd.DataFrame] = None,
     ) -> Dict:
-        sr_levels = self.find_support_resistance_levels(data_1d)
-        sr_levels = self._inject_structure_levels(sr_levels, structures, fibonacci.get("1D"))
+        # 1) Собрать уровни для 1D
+        sr_levels_1d = self.find_support_resistance_levels(data_1d)
+        sr_levels_1d = self._inject_structure_levels(sr_levels_1d, structures, fibonacci.get("1D"))
 
-        # Дополнительно: собрать 4H уровни, если передан data_h4
+        # 2) Собрать уровни для 4H (если есть данные)
+        sr_levels_4h: List[SupportResistanceLevel] = []
         if data_h4 is not None:
             try:
-                sr_h4 = self.find_support_resistance_levels_h4(data_h4, structures)
-                # Объединяем для анализа входа (1D остаются приоритетными в итоговой выдаче)
-                sr_levels = sr_levels + sr_h4
+                sr_levels_4h = self.find_support_resistance_levels_h4(data_h4, structures)
             except Exception:
                 pass
 
+        # 3) Выбрать 4 ключевых уровня
+        current_price = self._get_current_price(structures)
+        key_sr_levels = self.select_key_sr_levels(sr_levels_1d, sr_levels_4h, current_price)
+
+        # 4) Retail entry анализ (можно использовать полный набор уровней)
         retail_entry_analysis = self.analyze_retail_entry_probability(
-            fibonacci["1D"], sr_levels
+            fibonacci["1D"], sr_levels_1d + sr_levels_4h
         )
 
-        liquidity_zones = self.identify_liquidity_zones(structures, sr_levels)
+        # 5) SSL/BSL только от 4 ключевых уровней
+        liquidity_zones = self.identify_liquidity_zones_from_key_levels(structures, key_sr_levels)
 
         return {
-            "support_resistance_levels": sr_levels,
+            "support_resistance_levels": sr_levels_1d,  # оставляем для обратной совместимости (1D)
+            "support_resistance_levels_h4": sr_levels_4h,  # и 4H
+            "key_sr_levels": key_sr_levels.to_dict(),
             "retail_entry_analysis": retail_entry_analysis,
             "liquidity_zones": liquidity_zones,
         }
+
+    def select_key_sr_levels(
+        self,
+        sr_levels_1d: List[SupportResistanceLevel],
+        sr_levels_4h: List[SupportResistanceLevel],
+        current_price: float,
+    ) -> KeySRLevels:
+        supports_1d = [sr for sr in sr_levels_1d if sr.level_type == "support" and sr.zone_boundaries is not None]
+        resistances_1d = [sr for sr in sr_levels_1d if sr.level_type == "resistance" and sr.zone_boundaries is not None]
+        supports_4h = [sr for sr in sr_levels_4h if sr.level_type == "support" and sr.zone_boundaries is not None]
+        resistances_4h = [sr for sr in sr_levels_4h if sr.level_type == "resistance" and sr.zone_boundaries is not None]
+
+        d1_support = self._select_best_sr(supports_1d, current_price, is_support=True)
+        d1_resistance = self._select_best_sr(resistances_1d, current_price, is_support=False)
+        h4_support = self._select_best_sr(supports_4h, current_price, is_support=True)
+        h4_resistance = self._select_best_sr(resistances_4h, current_price, is_support=False)
+
+        return KeySRLevels(
+            d1_support=self._convert_to_key_sr_level(d1_support) if d1_support else None,
+            d1_resistance=self._convert_to_key_sr_level(d1_resistance) if d1_resistance else None,
+            h4_support=self._convert_to_key_sr_level(h4_support) if h4_support else None,
+            h4_resistance=self._convert_to_key_sr_level(h4_resistance) if h4_resistance else None,
+        )
+
+    def _select_best_sr(
+        self,
+        sr_list: List[SupportResistanceLevel],
+        current_price: float,
+        is_support: bool,
+    ) -> Optional[SupportResistanceLevel]:
+        if not sr_list:
+            return None
+        from datetime import datetime
+        now = datetime.now()
+        scored: List[tuple[float, SupportResistanceLevel]] = []
+        for sr in sr_list:
+            score = float(sr.strength) * float((sr.obviousness_score or 0.7))
+            if sr.last_touch:
+                try:
+                    last_touch_dt = datetime.fromisoformat(sr.last_touch.replace("+00:00", ""))
+                    days_ago = (now - last_touch_dt).days
+                    freshness_weight = max(0.5, 1.0 - (days_ago / 14.0))
+                    score *= freshness_weight
+                except Exception:
+                    pass
+            if current_price > 0:
+                distance = abs(float(sr.price) - current_price) / current_price
+                distance_weight = 1.0 / (1.0 + distance * 10.0)
+                score *= distance_weight
+            scored.append((score, sr))
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return scored[0][1]
+
+    def _convert_to_key_sr_level(self, sr: SupportResistanceLevel) -> KeySRLevel:
+        zb = sr.zone_boundaries
+        assert zb is not None, "zone_boundaries must be present for KeySRLevel"
+        return KeySRLevel(
+            zone_boundaries=(float(zb[0]), float(zb[1])),
+            strength=float(sr.strength),
+            obviousness_score=float(sr.obviousness_score or 0.7),
+            touches=int(sr.touches),
+            last_touch=sr.last_touch,
+            reaction_strengths=[float(x) for x in (sr.reaction_strengths or [])] if sr.reaction_strengths else None,
+            time_separation_hours=[float(x) for x in (sr.time_separation_hours or [])] if sr.time_separation_hours else None,
+        )
 
     def _inject_structure_levels(
         self,
@@ -262,6 +337,105 @@ class RetailBehaviorAnalyzer:
                     )
                 )
         return sr_levels
+
+    def identify_liquidity_zones_from_key_levels(
+        self,
+        structures: Dict[str, StructureAnalysis],
+        key_sr_levels: KeySRLevels,
+    ) -> List[LiquidityZone]:
+        liquidity_zones: List[LiquidityZone] = []
+        current_price = self._get_current_price(structures)
+
+        # 1D support -> SSL
+        if key_sr_levels.d1_support and "1D" in structures:
+            struct = structures["1D"]
+            zone = self._find_ssl_from_key_level(key_sr_levels.d1_support, struct.all_swing_lows or [], current_price, "1D")
+            if zone:
+                liquidity_zones.append(zone)
+        # 1D resistance -> BSL
+        if key_sr_levels.d1_resistance and "1D" in structures:
+            struct = structures["1D"]
+            zone = self._find_bsl_from_key_level(key_sr_levels.d1_resistance, struct.all_swing_highs or [], current_price, "1D")
+            if zone:
+                liquidity_zones.append(zone)
+        # 4H support -> SSL
+        if key_sr_levels.h4_support and "4H" in structures:
+            struct = structures["4H"]
+            zone = self._find_ssl_from_key_level(key_sr_levels.h4_support, struct.all_swing_lows or [], current_price, "4H")
+            if zone:
+                liquidity_zones.append(zone)
+        # 4H resistance -> BSL
+        if key_sr_levels.h4_resistance and "4H" in structures:
+            struct = structures["4H"]
+            zone = self._find_bsl_from_key_level(key_sr_levels.h4_resistance, struct.all_swing_highs or [], current_price, "4H")
+            if zone:
+                liquidity_zones.append(zone)
+
+        return self._deduplicate_liquidity_zones(liquidity_zones)
+
+    def _find_ssl_from_key_level(
+        self,
+        key_level: KeySRLevel,
+        swing_lows: List[SwingPoint],
+        current_price: float,
+        timeframe: str,
+    ) -> Optional[LiquidityZone]:
+        lower = float(key_level.zone_boundaries[0])
+        candidates = [sw for sw in swing_lows if float(sw.price) < lower]
+        if not candidates:
+            return None
+        candidates.sort(key=lambda sw: abs(float(sw.price) - lower))
+        max_distance = lower * 0.02
+        for sw in candidates:
+            distance = lower - float(sw.price)
+            if distance > max_distance:
+                continue
+            if current_price > 0 and abs(float(sw.price) - current_price) / current_price > 0.15:
+                continue
+            return LiquidityZone(
+                price=float(sw.price),
+                zone_type="SSL",
+                strength=float(key_level.strength),
+                estimated_volume="high" if float(key_level.obviousness_score) > 0.8 else "medium",
+                retail_logic=f"Retail stops below {timeframe} support (zone: {key_level.zone_boundaries[0]:.6f}-{key_level.zone_boundaries[1]:.6f})",
+                derived_from_sr_boundaries=(float(key_level.zone_boundaries[0]), float(key_level.zone_boundaries[1])),
+                sr_timeframe=timeframe,
+                swing_timestamp=getattr(sw, "timestamp", None),
+                swing_strength=float(getattr(sw, "strength", 0.0) or 0.0),
+            )
+        return None
+
+    def _find_bsl_from_key_level(
+        self,
+        key_level: KeySRLevel,
+        swing_highs: List[SwingPoint],
+        current_price: float,
+        timeframe: str,
+    ) -> Optional[LiquidityZone]:
+        upper = float(key_level.zone_boundaries[1])
+        candidates = [sw for sw in swing_highs if float(sw.price) > upper]
+        if not candidates:
+            return None
+        candidates.sort(key=lambda sw: abs(float(sw.price) - upper))
+        max_distance = upper * 0.02
+        for sw in candidates:
+            distance = float(sw.price) - upper
+            if distance > max_distance:
+                continue
+            if current_price > 0 and abs(float(sw.price) - current_price) / current_price > 0.15:
+                continue
+            return LiquidityZone(
+                price=float(sw.price),
+                zone_type="BSL",
+                strength=float(key_level.strength),
+                estimated_volume="high" if float(key_level.obviousness_score) > 0.8 else "medium",
+                retail_logic=f"Retail stops above {timeframe} resistance (zone: {key_level.zone_boundaries[0]:.6f}-{key_level.zone_boundaries[1]:.6f})",
+                derived_from_sr_boundaries=(float(key_level.zone_boundaries[0]), float(key_level.zone_boundaries[1])),
+                sr_timeframe=timeframe,
+                swing_timestamp=getattr(sw, "timestamp", None),
+                swing_strength=float(getattr(sw, "strength", 0.0) or 0.0),
+            )
+        return None
 
     def _assess_retail_likelihood(self, level_price: float, level_type: str) -> bool:
         return level_type == "support"
