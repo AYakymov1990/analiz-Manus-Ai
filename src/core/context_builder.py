@@ -68,13 +68,29 @@ def _retail_implications_from_zone(zone_value: str) -> str:
 
 
 def _serialize_sr_level(lvl: SupportResistanceLevel) -> Dict[str, Any]:
-    return {
+    obj: Dict[str, Any] = {
         "price": float(lvl.price),
         "touches": int(lvl.touches),
         "strength": float(lvl.strength),
         "type": lvl.level_type,
         "retail_likely": bool(lvl.retail_likely_to_trade),
     }
+    # Optional SMC fields
+    if getattr(lvl, "timeframe", None) is not None:
+        obj["timeframe"] = lvl.timeframe
+    if getattr(lvl, "zone_boundaries", None) is not None:
+        lo, hi = lvl.zone_boundaries  # type: ignore
+        obj["zone_boundaries"] = [float(lo), float(hi)]
+    if getattr(lvl, "obviousness_score", None) is not None:
+        obj["obviousness_score"] = float(lvl.obviousness_score)  # type: ignore
+    if getattr(lvl, "last_touch", None) is not None:
+        obj["last_touch"] = lvl.last_touch  # ISO str
+    if getattr(lvl, "reaction_strengths", None) is not None:
+        obj["reaction_strengths"] = [float(x) for x in (lvl.reaction_strengths or [])]
+    # Map time_separation_hours -> time_separation
+    if getattr(lvl, "time_separation_hours", None) is not None:
+        obj["time_separation"] = [float(x) for x in (lvl.time_separation_hours or [])]
+    return obj
 
 
 def _serialize_liquidity_zone(z: LiquidityZone) -> Dict[str, Any]:
@@ -101,6 +117,7 @@ def build_manus_context(symbol: str, analysis_results: AnalysisResults) -> Dict[
     fib1d_zone = analysis_results.fibonacci["1D"].current_zone.value
 
     # Retail blocks
+    sr_levels_h4 = analysis_results.retail.get("support_resistance_levels_h4", [])
     sr_levels = analysis_results.retail.get("support_resistance_levels", [])
     liq_zones = analysis_results.retail.get("liquidity_zones", [])
     retail_entry = analysis_results.retail.get("retail_entry_analysis", {})
@@ -137,7 +154,8 @@ def build_manus_context(symbol: str, analysis_results: AnalysisResults) -> Dict[
         },
         "retail_behavior": {
             "sentiment": retail_sentiment,
-            "support_resistance": [_serialize_sr_level(x) for x in sr_levels],
+            "support_resistance_4h": [_serialize_sr_level(x) for x in sr_levels_h4],
+            "support_resistance_1d": [_serialize_sr_level(x) for x in sr_levels],
             "liquidity_zones": [_serialize_liquidity_zone(z) for z in liq_zones],
             "vulnerability_assessment": {
                 "near_support": bool(retail_entry.get("nearby_support")),

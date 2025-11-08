@@ -66,6 +66,15 @@ class SupportResistanceLevel:
     strength: float
     level_type: str  # "support" or "resistance"
     retail_likely_to_trade: bool
+    # Optional SMC metadata
+    timeframe: Optional[str] = None
+    zone_boundaries: Optional[Tuple[float, float]] = None
+    obviousness_score: Optional[float] = None
+    touch_timestamps: Optional[List[str]] = None
+    last_touch: Optional[str] = None
+    reaction_strengths: Optional[List[float]] = None
+    time_separation_hours: Optional[List[float]] = None
+    distance_percent: Optional[float] = None
 
 
 @dataclass

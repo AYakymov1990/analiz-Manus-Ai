@@ -1,94 +1,122 @@
 {
-  "symbol": "ETH-USD",
+  "symbol": "EURUSD=X",
   "data_windows": {
     "1D": [
-      "2025-08-30 00:00:00+00:00",
-      "2025-10-04 00:00:00+00:00"
+      "2025-10-03 00:00:00+00:00",
+      "2025-11-07 00:00:00+00:00"
     ],
     "4H": [
-      "2025-09-20 04:00:00+00:00",
-      "2025-10-04 04:00:00+00:00"
+      "2025-10-24 20:00:00+00:00",
+      "2025-11-07 20:00:00+00:00"
     ]
   },
-  "current_price": 4506.98974609375,
+  "current_price": 1.1570056676864624,
   "fibonacci": {
     "1D": {
-      "zone": "ote",
-      "retracement": 0.7260082802008246,
-      "swing_high": 4762.85546875,
-      "swing_low": 3829.0107421875
+      "zone": "discount",
+      "retracement": 0.4889652144098841,
+      "swing_high": 1.1671334505081177,
+      "swing_low": 1.147315263748169
     },
     "4H": {
-      "zone": "discount",
-      "retracement": 0.47673412360006673,
-      "swing_high": 4588.18359375,
-      "swing_low": 4433.01611328125
+      "zone": "extension_above",
+      "retracement": 1.6896802325581395,
+      "swing_high": 1.1555349826812744,
+      "swing_low": 1.15340256690979
     },
     "15M": {
-      "zone": "extension_below",
-      "retracement": -0.39231108497500733,
-      "swing_high": 4516.23828125,
-      "swing_low": 4509.595703125
+      "zone": "premium",
+      "retracement": 1.0,
+      "swing_high": 1.1570056676864624,
+      "swing_low": 1.156336784362793
     }
   },
   "support_resistance": {
     "1D": [
       {
-        "price": 3829.0107421875,
+        "price": 1.147315263748169,
         "touches": 3,
         "strength": 0.8,
-        "type": "support"
+        "type": "support",
+        "timeframe": "1D",
+        "zone_boundaries": [
+          1.1461679484844207,
+          1.148462579011917
+        ],
+        "obviousness_score": 0.7,
+        "last_touch": "2025-11-05T00:00:00+00:00"
       },
       {
-        "price": 4762.85546875,
+        "price": 1.1671334505081177,
         "touches": 3,
         "strength": 0.8,
-        "type": "resistance"
+        "type": "resistance",
+        "timeframe": "1D",
+        "zone_boundaries": [
+          1.1659663170576096,
+          1.1683005839586256
+        ],
+        "obviousness_score": 0.7,
+        "last_touch": "2025-10-28T00:00:00+00:00"
       }
     ],
     "4H": [
       {
-        "price": 4433.01611328125,
+        "price": 1.15340256690979,
         "touches": 3,
         "strength": 0.7,
-        "type": "support"
+        "type": "support",
+        "timeframe": "4H",
+        "zone_boundaries": [
+          1.1522491643428803,
+          1.1545559694766998
+        ],
+        "obviousness_score": 0.7,
+        "last_touch": "2025-11-07T08:00:00+00:00"
       },
       {
-        "price": 4588.18359375,
+        "price": 1.1555349826812744,
         "touches": 3,
         "strength": 0.7,
-        "type": "resistance"
+        "type": "resistance",
+        "timeframe": "4H",
+        "zone_boundaries": [
+          1.1543794476985931,
+          1.1566905176639555
+        ],
+        "obviousness_score": 0.7,
+        "last_touch": "2025-11-06T20:00:00+00:00"
       }
     ]
   },
   "liquidity_zones": [
     {
-      "price": 3825.1817314453124,
+      "price": 1.1461679484844207,
       "type": "SSL",
-      "strength": 0.8,
+      "strength": 0.6883449270136812,
       "volume": "high",
-      "logic": "Retail stops placed below 1D swing low at 3829.0107421875"
+      "logic": "Retail stops placed below 1D swing low at 1.147315263748169"
     },
     {
-      "price": 4428.583097167969,
+      "price": 1.1522491643428803,
       "type": "SSL",
-      "strength": 0.8205342370582304,
+      "strength": 0.7665023208404699,
       "volume": "medium",
-      "logic": "Retail stops placed below 4H swing low at 4433.01611328125"
+      "logic": "Retail stops placed below 4H swing low at 1.15340256690979"
     },
     {
-      "price": 4767.61832421875,
+      "price": 1.1683005839586256,
       "type": "BSL",
-      "strength": 0.8,
+      "strength": 0.6883449270136812,
       "volume": "high",
-      "logic": "Retail stops placed above 1D swing high at 4762.85546875"
+      "logic": "Retail stops placed above 1D swing high at 1.1671334505081177"
     },
     {
-      "price": 4592.77177734375,
+      "price": 1.1566905176639555,
       "type": "BSL",
-      "strength": 0.8205342370582304,
+      "strength": 0.7665023208404699,
       "volume": "medium",
-      "logic": "Retail stops placed above 4H swing high at 4588.18359375"
+      "logic": "Retail stops placed above 4H swing high at 1.1555349826812744"
     }
   ]
 }

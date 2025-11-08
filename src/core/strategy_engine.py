@@ -75,6 +75,13 @@ class TradingAnalyzer:
         structures = self.structure_analyzer.analyze_all_timeframes(data["1D"], data["4H"], data["15M"]) 
         fibs = self.fibonacci_analyzer.analyze_all_timeframes(structures, current_price)
         retail = self.retail_analyzer.analyze_retail_behavior(data["1D"], fibs, structures)
+        # Добавим 4H уровни S/R (SMC) в ретейл-контекст для приоритетного вывода
+        try:
+            retail["support_resistance_levels_h4"] = self.retail_analyzer.find_support_resistance_levels_h4(
+                data["4H"], structures
+            )
+        except Exception:
+            retail["support_resistance_levels_h4"] = []
         setup = self.setup_detector.detect_setup(structures, fibs, retail)
         manip = self.manipulation_detector.detect_manipulation(
             data["15M"].tail(500),

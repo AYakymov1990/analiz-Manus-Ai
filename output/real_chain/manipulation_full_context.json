@@ -3,8 +3,8 @@
   "confidence": 0.0,
   "details": {
     "structure": {
-      "swing_low": 3842.800048828125,
-      "swing_high": 3916.800048828125,
+      "swing_low": 3950.60009765625,
+      "swing_high": 4014.60009765625,
       "broke_below": false,
       "broke_above": false,
       "returned_above": false,
@@ -22,25 +22,25 @@
     }
   },
   "context": {
-    "current_price": 3912.10009765625,
+    "current_price": 4003.60009765625,
     "swing_levels": {
-      "1D_high": 3923.300048828125,
-      "1D_low": 3820.60009765625,
-      "4H_high": 3916.800048828125,
-      "4H_low": 3861.10009765625
+      "1D_high": 4014.60009765625,
+      "1D_low": 3842.800048828125,
+      "4H_high": 4000.10009765625,
+      "4H_low": 3963.39990234375
     },
     "liquidity_zones": {
       "BSL": [
-        3927.2233488769525,
-        3920.7168488769526
+        4018.6146977539056,
+        4004.100197753906
       ],
       "SSL": [
-        3816.779497558594,
-        3857.238997558594
+        3838.957248779297,
+        3959.4365024414064
       ]
     },
     "fibonacci_zone": "premium",
-    "setup_type": "counter_trend_ssl_hunt",
+    "setup_type": "no_setup",
     "market_structure": "bullish"
   }
 }

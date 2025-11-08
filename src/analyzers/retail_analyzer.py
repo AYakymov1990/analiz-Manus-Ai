@@ -1,4 +1,4 @@
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -10,6 +10,7 @@ from ..core.data_structures import (
     StructureAnalysis,
     SupportResistanceLevel,
 )
+from .smc_sr_detector import SmartMoneySRDetector
 
 
 class RetailBehaviorAnalyzer:
@@ -24,7 +25,7 @@ class RetailBehaviorAnalyzer:
         structures: Dict[str, StructureAnalysis],
     ) -> Dict:
         sr_levels = self.find_support_resistance_levels(data_1d)
-        sr_levels = self._inject_structure_levels(sr_levels, structures)
+        sr_levels = self._inject_structure_levels(sr_levels, structures, fibonacci.get("1D"))
 
         retail_entry_analysis = self.analyze_retail_entry_probability(
             fibonacci["1D"], sr_levels
@@ -39,11 +40,22 @@ class RetailBehaviorAnalyzer:
         }
 
     def _inject_structure_levels(
-        self, sr_levels: List[SupportResistanceLevel], structures: Dict[str, StructureAnalysis]
+        self,
+        sr_levels: List[SupportResistanceLevel],
+        structures: Dict[str, StructureAnalysis],
+        fib_1d: Optional[FibonacciAnalysis] = None,
     ) -> List[SupportResistanceLevel]:
         levels = list(sr_levels)
         d1 = structures.get("1D")
         if d1 is not None:
+            current_price = None
+            if fib_1d is not None:
+                try:
+                    current_price = float(
+                        fib_1d.swing_low + (fib_1d.swing_high - fib_1d.swing_low) * fib_1d.retracement_level
+                    )
+                except Exception:
+                    current_price = None
             anchors: List[SupportResistanceLevel] = [
                 SupportResistanceLevel(
                     price=float(d1.last_swing_low.price),
@@ -51,6 +63,19 @@ class RetailBehaviorAnalyzer:
                     strength=0.8,
                     level_type="support",
                     retail_likely_to_trade=True,
+                    timeframe="1D",
+                    zone_boundaries=(
+                        float(d1.last_swing_low.price) * 0.999,
+                        float(d1.last_swing_low.price) * 1.001,
+                    ),
+                    obviousness_score=0.7,
+                    touch_timestamps=[getattr(d1.last_swing_low, "timestamp", None).isoformat() if getattr(d1.last_swing_low, "timestamp", None) else None],
+                    last_touch=getattr(d1.last_swing_low, "timestamp", None).isoformat() if getattr(d1.last_swing_low, "timestamp", None) else None,
+                    distance_percent=(
+                        abs(float(d1.last_swing_low.price) - current_price) / max(current_price, 1e-9)
+                        if current_price is not None
+                        else None
+                    ),
                 ),
                 SupportResistanceLevel(
                     price=float(d1.last_swing_high.price),
@@ -58,6 +83,19 @@ class RetailBehaviorAnalyzer:
                     strength=0.8,
                     level_type="resistance",
                     retail_likely_to_trade=True,
+                    timeframe="1D",
+                    zone_boundaries=(
+                        float(d1.last_swing_high.price) * 0.999,
+                        float(d1.last_swing_high.price) * 1.001,
+                    ),
+                    obviousness_score=0.7,
+                    touch_timestamps=[getattr(d1.last_swing_high, "timestamp", None).isoformat() if getattr(d1.last_swing_high, "timestamp", None) else None],
+                    last_touch=getattr(d1.last_swing_high, "timestamp", None).isoformat() if getattr(d1.last_swing_high, "timestamp", None) else None,
+                    distance_percent=(
+                        abs(float(d1.last_swing_high.price) - current_price) / max(current_price, 1e-9)
+                        if current_price is not None
+                        else None
+                    ),
                 ),
             ]
             for a in anchors:
@@ -110,11 +148,26 @@ class RetailBehaviorAnalyzer:
         return support_levels + resistance_levels
 
     def find_support_resistance_levels_h4(self, data_h4: pd.DataFrame, structures: Dict[str, StructureAnalysis]) -> List[SupportResistanceLevel]:
-        """S/R для 4H с обязательной инъекцией якорей (минимум 3 касания)."""
-        levels = self.find_support_resistance_levels(data_h4)
+        """S/R для 4H по SMC с обязательной инъекцией якорей (минимум 3 касания)."""
+        detector = SmartMoneySRDetector(
+            lookback_candles=300,
+            min_touches=max(self.min_touches, 3),
+            max_touches=10,
+            tolerance_percent=0.001,
+            min_reaction_percent=0.002,
+            min_time_separation_hours=12.0,
+            max_levels=6,
+            pivot_span=2,
+        )
+        levels = detector.detect(data_h4, timeframe="4H")
         h4 = structures.get("4H")
         if h4 is None:
             return levels
+        # Текущее значение цены H4 для distance_percent
+        try:
+            curr_price_h4 = float(data_h4["Close"].iloc[-1])
+        except Exception:
+            curr_price_h4 = None
         anchors: List[SupportResistanceLevel] = [
             SupportResistanceLevel(
                 price=float(h4.last_swing_low.price),
@@ -122,6 +175,19 @@ class RetailBehaviorAnalyzer:
                 strength=0.7,
                 level_type="support",
                 retail_likely_to_trade=True,
+                timeframe="4H",
+                zone_boundaries=(
+                    float(h4.last_swing_low.price) * 0.999,
+                    float(h4.last_swing_low.price) * 1.001,
+                ),
+                obviousness_score=0.7,
+                touch_timestamps=[getattr(h4.last_swing_low, "timestamp", None).isoformat() if getattr(h4.last_swing_low, "timestamp", None) else None],
+                last_touch=getattr(h4.last_swing_low, "timestamp", None).isoformat() if getattr(h4.last_swing_low, "timestamp", None) else None,
+                distance_percent=(
+                    abs(float(h4.last_swing_low.price) - curr_price_h4) / max(curr_price_h4, 1e-9)
+                    if curr_price_h4 is not None
+                    else None
+                ),
             ),
             SupportResistanceLevel(
                 price=float(h4.last_swing_high.price),
@@ -129,6 +195,19 @@ class RetailBehaviorAnalyzer:
                 strength=0.7,
                 level_type="resistance",
                 retail_likely_to_trade=True,
+                timeframe="4H",
+                zone_boundaries=(
+                    float(h4.last_swing_high.price) * 0.999,
+                    float(h4.last_swing_high.price) * 1.001,
+                ),
+                obviousness_score=0.7,
+                touch_timestamps=[getattr(h4.last_swing_high, "timestamp", None).isoformat() if getattr(h4.last_swing_high, "timestamp", None) else None],
+                last_touch=getattr(h4.last_swing_high, "timestamp", None).isoformat() if getattr(h4.last_swing_high, "timestamp", None) else None,
+                distance_percent=(
+                    abs(float(h4.last_swing_high.price) - curr_price_h4) / max(curr_price_h4, 1e-9)
+                    if curr_price_h4 is not None
+                    else None
+                ),
             ),
         ]
         def _present(levels_list: List[SupportResistanceLevel], a: SupportResistanceLevel, tol: float = 0.001) -> bool:

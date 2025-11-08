@@ -21,10 +21,12 @@ def main() -> None:
     parser.add_argument("symbol", type=str, help="Yahoo Finance symbol, e.g., GC=F, EURUSD=X, BTC-USD")
     parser.add_argument("--no-save", action="store_true", help="Do not save JSON output to file")
     parser.add_argument("--emit-summary", action="store_true", help="Also emit legacy real_chain_summary.json")
+    parser.add_argument("--single-file", action="store_true", help="Write only output/real_chain/manus_ai_context.json and skip symbol+timestamp file")
     args = parser.parse_args()
 
     analyzer = TradingAnalyzer()
-    context = analyzer.analyze(args.symbol, save_output=not args.no_save)
+    # If --single-file is used, suppress engine's timestamped output
+    context = analyzer.analyze(args.symbol, save_output=not (args.no_save or args.single_file))
 
     print(json.dumps({
         "symbol": context.get("metadata", {}).get("symbol"),
@@ -33,6 +35,14 @@ def main() -> None:
         "manipulation": context.get("manipulation_context", {}).get("expected_manipulation"),
         "fib_1d_zone": context.get("fibonacci_analysis", {}).get("1d", {}).get("zone"),
     }, ensure_ascii=False))
+
+    # Write a single stable file if requested
+    if args.single_file and not args.no_save:
+        out_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "output", "real_chain"))
+        os.makedirs(out_dir, exist_ok=True)
+        out_path = os.path.join(out_dir, "manus_ai_context.json")
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump(context, f, ensure_ascii=False, indent=2)
 
     if args.emit_summary:
         assert yf is not None, "yfinance недоступен"
@@ -73,14 +83,25 @@ def main() -> None:
         retail = ra.analyze_retail_behavior(win_1d, fibs, structures)
         levels_4h = ra.find_support_resistance_levels_h4(win_4h, structures)
 
-        sr_1d = [
-            {"price": lvl.price, "touches": lvl.touches, "strength": lvl.strength, "type": lvl.level_type}
-            for lvl in retail["support_resistance_levels"]
-        ]
-        sr_4h = [
-            {"price": lvl.price, "touches": lvl.touches, "strength": lvl.strength, "type": lvl.level_type}
-            for lvl in levels_4h
-        ]
+        def _ser_lvl(lvl):
+            obj = {"price": lvl.price, "touches": lvl.touches, "strength": lvl.strength, "type": lvl.level_type}
+            if getattr(lvl, "timeframe", None) is not None:
+                obj["timeframe"] = lvl.timeframe
+            if getattr(lvl, "zone_boundaries", None) is not None:
+                lo, hi = lvl.zone_boundaries
+                obj["zone_boundaries"] = [float(lo), float(hi)]
+            if getattr(lvl, "obviousness_score", None) is not None:
+                obj["obviousness_score"] = float(lvl.obviousness_score)
+            if getattr(lvl, "last_touch", None) is not None:
+                obj["last_touch"] = lvl.last_touch
+            if getattr(lvl, "reaction_strengths", None) is not None:
+                obj["reaction_strengths"] = [float(x) for x in (lvl.reaction_strengths or [])]
+            if getattr(lvl, "time_separation_hours", None) is not None:
+                obj["time_separation"] = [float(x) for x in (lvl.time_separation_hours or [])]
+            return obj
+
+        sr_1d = [_ser_lvl(lvl) for lvl in retail["support_resistance_levels"]]
+        sr_4h = [_ser_lvl(lvl) for lvl in levels_4h]
 
         report: Dict = {
             "symbol": args.symbol,
