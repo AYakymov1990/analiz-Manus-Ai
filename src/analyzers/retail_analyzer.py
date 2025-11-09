@@ -3,6 +3,7 @@ import logging
 
 import numpy as np
 import pandas as pd
+from datetime import datetime
 
 from ..core.data_structures import (
     FibonacciAnalysis,
@@ -411,9 +412,10 @@ class RetailBehaviorAnalyzer:
                 "1D",
                 symbol=self.symbol,
                 data=src_1d,
+                sr_last_touch=key_sr_levels.d1_support.last_touch if key_sr_levels.d1_support else None,
             )
-            # оставить ближайшие 2 к границе
-            zones.sort(key=lambda z: abs(float(z.price) - lower))
+            # оставить первые по времени (макс 2)
+            zones.sort(key=lambda z: getattr(z, "swing_timestamp", datetime.min))
             liquidity_zones.extend(zones[:2])
             # Fallback: если 1D SSL не найден — принудительно выбрать ближайший ниже зоны
             if not any(z.zone_type == "SSL" and z.timeframe == "1D" for z in liquidity_zones):
@@ -520,8 +522,9 @@ class RetailBehaviorAnalyzer:
                 "1D",
                 symbol=self.symbol,
                 data=src_1d,
+                sr_last_touch=key_sr_levels.d1_resistance.last_touch if key_sr_levels.d1_resistance else None,
             )
-            zones.sort(key=lambda z: abs(float(z.price) - upper))
+            zones.sort(key=lambda z: getattr(z, "swing_timestamp", datetime.min))
             liquidity_zones.extend(zones[:2])
         # 4H support -> все SSL (ограничить ближайшей 1)
         if key_sr_levels.h4_support and "4H" in structures:
@@ -536,8 +539,9 @@ class RetailBehaviorAnalyzer:
                 "4H",
                 symbol=self.symbol,
                 data=src_h4,
+                sr_last_touch=key_sr_levels.h4_support.last_touch if key_sr_levels.h4_support else None,
             )
-            zones.sort(key=lambda z: abs(float(z.price) - lower))
+            zones.sort(key=lambda z: getattr(z, "swing_timestamp", datetime.min))
             liquidity_zones.extend(zones[:1])
             # ATR-based fallback if none found for 4H SSL
             if not any(z.zone_type == "SSL" and z.timeframe == "4H" for z in liquidity_zones):
@@ -583,8 +587,9 @@ class RetailBehaviorAnalyzer:
                 "4H",
                 symbol=self.symbol,
                 data=src_h4,
+                sr_last_touch=key_sr_levels.h4_resistance.last_touch if key_sr_levels.h4_resistance else None,
             )
-            zones.sort(key=lambda z: abs(float(z.price) - upper))
+            zones.sort(key=lambda z: getattr(z, "swing_timestamp", datetime.min))
             liquidity_zones.extend(zones[:1])
             # ATR-based fallback if none found for 4H BSL
             if not any(z.zone_type == "BSL" and z.timeframe == "4H" for z in liquidity_zones):
@@ -753,6 +758,7 @@ class RetailBehaviorAnalyzer:
         timeframe: str,
         symbol: str = "UNKNOWN",
         data: Optional[pd.DataFrame] = None,
+        sr_last_touch: Optional[str] = None,
     ) -> List[LiquidityZone]:
         lower = float(key_level.zone_boundaries[0])
         candidates = [sw for sw in swing_lows if float(sw.price) < lower]
@@ -762,7 +768,17 @@ class RetailBehaviorAnalyzer:
             candidates = [sw for sw in candidates if float(sw.price) < current_price]
             if not candidates:
                 return []
-        candidates.sort(key=lambda sw: abs(float(sw.price) - lower))
+        # Time-gate by last touch if present
+        if sr_last_touch:
+            try:
+                cut = datetime.fromisoformat(sr_last_touch.replace("+00:00", ""))
+                tfiltered = [sw for sw in candidates if getattr(sw, "timestamp", None) and sw.timestamp >= cut]
+                if tfiltered:
+                    candidates = tfiltered
+            except Exception:
+                pass
+        # Sort chronologically (earliest first)
+        candidates.sort(key=lambda sw: getattr(sw, "timestamp", datetime.min))
         # Asset-specific parameters and ATR-based distance
         params = self._get_asset_params(symbol, current_price)
         atr = self._calculate_atr(data, period=14) if data is not None else 0.0
@@ -805,6 +821,7 @@ class RetailBehaviorAnalyzer:
         timeframe: str,
         symbol: str = "UNKNOWN",
         data: Optional[pd.DataFrame] = None,
+        sr_last_touch: Optional[str] = None,
     ) -> List[LiquidityZone]:
         upper = float(key_level.zone_boundaries[1])
         candidates = [sw for sw in swing_highs if float(sw.price) > upper]
@@ -814,7 +831,17 @@ class RetailBehaviorAnalyzer:
             candidates = [sw for sw in candidates if float(sw.price) > current_price]
             if not candidates:
                 return []
-        candidates.sort(key=lambda sw: abs(float(sw.price) - upper))
+        # Time-gate by last touch if present
+        if sr_last_touch:
+            try:
+                cut = datetime.fromisoformat(sr_last_touch.replace("+00:00", ""))
+                tfiltered = [sw for sw in candidates if getattr(sw, "timestamp", None) and sw.timestamp >= cut]
+                if tfiltered:
+                    candidates = tfiltered
+            except Exception:
+                pass
+        # Sort chronologically (earliest first)
+        candidates.sort(key=lambda sw: getattr(sw, "timestamp", datetime.min))
         # Asset-specific parameters and ATR-based distance
         params = self._get_asset_params(symbol, current_price)
         atr = self._calculate_atr(data, period=14) if data is not None else 0.0

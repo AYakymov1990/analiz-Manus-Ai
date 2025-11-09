@@ -1,7 +1,7 @@
 {
   "metadata": {
     "symbol": "GBPUSD=X",
-    "analysis_timestamp": "2025-11-09T09:45:16.994638",
+    "analysis_timestamp": "2025-11-09T10:20:48.053820",
     "data_windows": {
       "1D": [
         "2025-10-03 00:00:00+00:00",
@@ -206,7 +206,7 @@
         "timeframe": "4H"
       },
       {
-        "price": 1.3443208932876587,
+        "price": 1.3471460342407227,
         "type": "BSL",
         "strength": 0.8,
         "volume": "medium",
