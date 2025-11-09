@@ -660,6 +660,7 @@ class RetailBehaviorAnalyzer:
         swing_lows: List[SwingPoint],
         current_price: float,
         timeframe: str,
+        sr_last_touch: Optional[str] = None,
     ) -> Optional[LiquidityZone]:
         lower = float(key_level.zone_boundaries[0])
         candidates = [sw for sw in swing_lows if float(sw.price) < lower]
@@ -670,7 +671,17 @@ class RetailBehaviorAnalyzer:
             candidates = [sw for sw in candidates if float(sw.price) < current_price]
             if not candidates:
                 return None
-        candidates.sort(key=lambda sw: abs(float(sw.price) - lower))
+        # Time-gate by last touch if present
+        if sr_last_touch:
+            try:
+                cut = datetime.fromisoformat(sr_last_touch.replace("+00:00", ""))
+                tfiltered = [sw for sw in candidates if getattr(sw, "timestamp", None) and sw.timestamp >= cut]
+                if tfiltered:
+                    candidates = tfiltered
+            except Exception:
+                pass
+        # Sort chronologically (earliest first)
+        candidates.sort(key=lambda sw: getattr(sw, "timestamp", datetime.min))
         max_distance = lower * (0.05 if timeframe == "1D" else 0.02)
         min_curr_ratio = 0.002 if timeframe == "1D" else 0.001  # 0.2% для 1D, 0.1% для 4H
         min_bound_ratio = 0.001 if timeframe == "1D" else 0.0005  # 0.1% для 1D, 0.05% для 4H
@@ -694,7 +705,7 @@ class RetailBehaviorAnalyzer:
                 zone_type="SSL",
                 strength=float(key_level.strength),
                 estimated_volume="high" if float(key_level.obviousness_score) > 0.8 else "medium",
-                retail_logic=f"Retail stops below {timeframe} support (zone: {key_level.zone_boundaries[0]:.6f}-{key_level.zone_boundaries[1]:.6f})",
+                retail_logic=f"First swing low below {timeframe} support (zone: {key_level.zone_boundaries[0]:.6f}-{key_level.zone_boundaries[1]:.6f})",
                 timeframe=timeframe,
                 derived_from_sr_boundaries=(float(key_level.zone_boundaries[0]), float(key_level.zone_boundaries[1])),
                 sr_timeframe=timeframe,
@@ -709,6 +720,7 @@ class RetailBehaviorAnalyzer:
         swing_highs: List[SwingPoint],
         current_price: float,
         timeframe: str,
+        sr_last_touch: Optional[str] = None,
     ) -> Optional[LiquidityZone]:
         upper = float(key_level.zone_boundaries[1])
         candidates = [sw for sw in swing_highs if float(sw.price) > upper]
@@ -719,7 +731,17 @@ class RetailBehaviorAnalyzer:
             candidates = [sw for sw in candidates if float(sw.price) > current_price]
             if not candidates:
                 return None
-        candidates.sort(key=lambda sw: abs(float(sw.price) - upper))
+        # Time-gate by last touch if present
+        if sr_last_touch:
+            try:
+                cut = datetime.fromisoformat(sr_last_touch.replace("+00:00", ""))
+                tfiltered = [sw for sw in candidates if getattr(sw, "timestamp", None) and sw.timestamp >= cut]
+                if tfiltered:
+                    candidates = tfiltered
+            except Exception:
+                pass
+        # Sort chronologically (earliest first)
+        candidates.sort(key=lambda sw: getattr(sw, "timestamp", datetime.min))
         max_distance = upper * (0.05 if timeframe == "1D" else 0.02)
         min_curr_ratio = 0.002 if timeframe == "1D" else 0.001
         min_bound_ratio = 0.001 if timeframe == "1D" else 0.0005
@@ -741,7 +763,7 @@ class RetailBehaviorAnalyzer:
                 zone_type="BSL",
                 strength=float(key_level.strength),
                 estimated_volume="high" if float(key_level.obviousness_score) > 0.8 else "medium",
-                retail_logic=f"Retail stops above {timeframe} resistance (zone: {key_level.zone_boundaries[0]:.6f}-{key_level.zone_boundaries[1]:.6f})",
+                retail_logic=f"First swing high above {timeframe} resistance (zone: {key_level.zone_boundaries[0]:.6f}-{key_level.zone_boundaries[1]:.6f})",
                 timeframe=timeframe,
                 derived_from_sr_boundaries=(float(key_level.zone_boundaries[0]), float(key_level.zone_boundaries[1])),
                 sr_timeframe=timeframe,
