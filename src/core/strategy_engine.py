@@ -81,6 +81,11 @@ class TradingAnalyzer:
 
         structures = self.structure_analyzer.analyze_all_timeframes(data["1D"], data["4H"], data["15M"]) 
         fibs = self.fibonacci_analyzer.analyze_all_timeframes(structures, current_price)
+        # Ensure retail analyzer knows current symbol for asset-specific thresholds
+        try:
+            self.retail_analyzer.symbol = symbol
+        except Exception:
+            pass
         retail = self.retail_analyzer.analyze_retail_behavior(
             data["1D"],
             fibs,

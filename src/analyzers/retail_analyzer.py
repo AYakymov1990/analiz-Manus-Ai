@@ -22,6 +22,7 @@ class RetailBehaviorAnalyzer:
         self.symbol = symbol
         self.min_touches = 3
         self.logger = logging.getLogger(__name__)
+        # Asset-specific defaults can be adjusted via _get_asset_params
 
     def analyze_retail_behavior(
         self,
@@ -249,7 +250,7 @@ class RetailBehaviorAnalyzer:
     def find_support_resistance_levels_h4(self, data_h4: pd.DataFrame, structures: Dict[str, StructureAnalysis]) -> List[SupportResistanceLevel]:
         """S/R для 4H по SMC с обязательной инъекцией якорей (минимум 3 касания)."""
         detector = SmartMoneySRDetector(
-            lookback_candles=300,
+            lookback_candles=1000,
             min_touches=max(self.min_touches, 3),
             max_touches=10,
             tolerance_percent=0.001,
@@ -403,7 +404,14 @@ class RetailBehaviorAnalyzer:
             swing_lows = _aug(struct.all_swing_lows or [], src_1d, "low", lower, "1D")
             self.logger.info("1D Support zone: [%s, %s]", f"{lower:.6f}", f"{upper:.6f}")
             self.logger.info("Found %d 1D swing lows total", len(swing_lows))
-            zones = self._find_all_ssl_from_key_level(key_sr_levels.d1_support, swing_lows, runtime_current, "1D")
+            zones = self._find_all_ssl_from_key_level(
+                key_sr_levels.d1_support,
+                swing_lows,
+                runtime_current,
+                "1D",
+                symbol=self.symbol,
+                data=src_1d,
+            )
             # оставить ближайшие 2 к границе
             zones.sort(key=lambda z: abs(float(z.price) - lower))
             liquidity_zones.extend(zones[:2])
@@ -505,7 +513,14 @@ class RetailBehaviorAnalyzer:
             upper = float(key_sr_levels.d1_resistance.zone_boundaries[1])
             src_1d = data_1d_full if data_1d_full is not None else data_1d
             swing_highs = _aug(struct.all_swing_highs or [], src_1d, "high", upper, "1D")
-            zones = self._find_all_bsl_from_key_level(key_sr_levels.d1_resistance, swing_highs, runtime_current, "1D")
+            zones = self._find_all_bsl_from_key_level(
+                key_sr_levels.d1_resistance,
+                swing_highs,
+                runtime_current,
+                "1D",
+                symbol=self.symbol,
+                data=src_1d,
+            )
             zones.sort(key=lambda z: abs(float(z.price) - upper))
             liquidity_zones.extend(zones[:2])
         # 4H support -> все SSL (ограничить ближайшей 1)
@@ -514,18 +529,94 @@ class RetailBehaviorAnalyzer:
             lower = float(key_sr_levels.h4_support.zone_boundaries[0])
             src_h4 = data_h4_full if data_h4_full is not None else data_h4
             swing_lows = _aug(struct.all_swing_lows or [], src_h4, "low", lower, "4H")
-            zones = self._find_all_ssl_from_key_level(key_sr_levels.h4_support, swing_lows, runtime_current, "4H")
+            zones = self._find_all_ssl_from_key_level(
+                key_sr_levels.h4_support,
+                swing_lows,
+                runtime_current,
+                "4H",
+                symbol=self.symbol,
+                data=src_h4,
+            )
             zones.sort(key=lambda z: abs(float(z.price) - lower))
             liquidity_zones.extend(zones[:1])
+            # ATR-based fallback if none found for 4H SSL
+            if not any(z.zone_type == "SSL" and z.timeframe == "4H" for z in liquidity_zones):
+                self.logger.warning("❌ No 4H SSL found below support zone - using ATR/historical fallback")
+                atr = self._calculate_atr(src_h4, period=14) if src_h4 is not None else 0.0
+                params = self._get_asset_params(self.symbol, runtime_current)
+                if atr > 0.0:
+                    calculated_ssl = lower - (atr * params["atr_multiplier"])
+                    self.logger.info("✅ 4H SSL added (ATR): %.6f (lower=%.6f - ATR=%.2f * %.1f)", calculated_ssl, lower, atr, params["atr_multiplier"])
+                else:
+                    historical_low = float(src_h4["Low"].min()) if src_h4 is not None and len(src_h4) > 0 else lower
+                    if historical_low < lower:
+                        calculated_ssl = historical_low
+                        self.logger.info("✅ 4H SSL added (historical low): %.6f", calculated_ssl)
+                    else:
+                        calculated_ssl = lower * (1.0 - params["max_distance_ratio"] / 2.0)
+                        self.logger.info("✅ 4H SSL added (percentage): %.6f", calculated_ssl)
+                liquidity_zones.append(
+                    LiquidityZone(
+                        price=float(calculated_ssl),
+                        zone_type="SSL",
+                        strength=float(key_sr_levels.h4_support.strength),
+                        estimated_volume="medium",
+                        retail_logic=f"Retail stops below 4H support (zone: {lower:.6f}-{float(key_sr_levels.h4_support.zone_boundaries[1]):.6f}) [calculated]",
+                        timeframe="4H",
+                        derived_from_sr_boundaries=(
+                            float(key_sr_levels.h4_support.zone_boundaries[0]),
+                            float(key_sr_levels.h4_support.zone_boundaries[1]),
+                        ),
+                        sr_timeframe="4H",
+                    )
+                )
         # 4H resistance -> все BSL (ограничить ближайшей 1)
         if key_sr_levels.h4_resistance and "4H" in structures:
             struct = structures["4H"]
             upper = float(key_sr_levels.h4_resistance.zone_boundaries[1])
             src_h4 = data_h4_full if data_h4_full is not None else data_h4
             swing_highs = _aug(struct.all_swing_highs or [], src_h4, "high", upper, "4H")
-            zones = self._find_all_bsl_from_key_level(key_sr_levels.h4_resistance, swing_highs, runtime_current, "4H")
+            zones = self._find_all_bsl_from_key_level(
+                key_sr_levels.h4_resistance,
+                swing_highs,
+                runtime_current,
+                "4H",
+                symbol=self.symbol,
+                data=src_h4,
+            )
             zones.sort(key=lambda z: abs(float(z.price) - upper))
             liquidity_zones.extend(zones[:1])
+            # ATR-based fallback if none found for 4H BSL
+            if not any(z.zone_type == "BSL" and z.timeframe == "4H" for z in liquidity_zones):
+                self.logger.warning("❌ No 4H BSL found above resistance zone - using ATR/historical fallback")
+                atr = self._calculate_atr(src_h4, period=14) if src_h4 is not None else 0.0
+                params = self._get_asset_params(self.symbol, runtime_current)
+                if atr > 0.0:
+                    calculated_bsl = upper + (atr * params["atr_multiplier"])
+                    self.logger.info("✅ 4H BSL added (ATR): %.6f (upper=%.6f + ATR=%.2f * %.1f)", calculated_bsl, upper, atr, params["atr_multiplier"])
+                else:
+                    historical_high = float(src_h4["High"].max()) if src_h4 is not None and len(src_h4) > 0 else upper
+                    if historical_high > upper:
+                        calculated_bsl = historical_high
+                        self.logger.info("✅ 4H BSL added (historical high): %.6f", calculated_bsl)
+                    else:
+                        calculated_bsl = upper * (1.0 + params["max_distance_ratio"] / 2.0)
+                        self.logger.info("✅ 4H BSL added (percentage): %.6f", calculated_bsl)
+                liquidity_zones.append(
+                    LiquidityZone(
+                        price=float(calculated_bsl),
+                        zone_type="BSL",
+                        strength=float(key_sr_levels.h4_resistance.strength),
+                        estimated_volume="medium",
+                        retail_logic=f"Retail stops above 4H resistance (zone: {float(key_sr_levels.h4_resistance.zone_boundaries[0]):.6f}-{upper:.6f}) [calculated]",
+                        timeframe="4H",
+                        derived_from_sr_boundaries=(
+                            float(key_sr_levels.h4_resistance.zone_boundaries[0]),
+                            float(key_sr_levels.h4_resistance.zone_boundaries[1]),
+                        ),
+                        sr_timeframe="4H",
+                    )
+                )
 
         return self._deduplicate_liquidity_zones(liquidity_zones)
 
@@ -660,6 +751,8 @@ class RetailBehaviorAnalyzer:
         swing_lows: List[SwingPoint],
         current_price: float,
         timeframe: str,
+        symbol: str = "UNKNOWN",
+        data: Optional[pd.DataFrame] = None,
     ) -> List[LiquidityZone]:
         lower = float(key_level.zone_boundaries[0])
         candidates = [sw for sw in swing_lows if float(sw.price) < lower]
@@ -670,9 +763,12 @@ class RetailBehaviorAnalyzer:
             if not candidates:
                 return []
         candidates.sort(key=lambda sw: abs(float(sw.price) - lower))
-        max_distance = lower * (0.05 if timeframe == "1D" else 0.02)
+        # Asset-specific parameters and ATR-based distance
+        params = self._get_asset_params(symbol, current_price)
+        atr = self._calculate_atr(data, period=14) if data is not None else 0.0
+        max_distance = (atr * params["atr_multiplier"]) if atr and atr > 0.0 else (lower * params["max_distance_ratio"])
         min_curr_ratio = 0.002 if timeframe == "1D" else 0.001
-        min_bound_ratio = 0.001 if timeframe == "1D" else 0.0005
+        min_bound_ratio = params["min_bound_ratio"]
         zones: List[LiquidityZone] = []
         for sw in candidates:
             distance = lower - float(sw.price)
@@ -707,6 +803,8 @@ class RetailBehaviorAnalyzer:
         swing_highs: List[SwingPoint],
         current_price: float,
         timeframe: str,
+        symbol: str = "UNKNOWN",
+        data: Optional[pd.DataFrame] = None,
     ) -> List[LiquidityZone]:
         upper = float(key_level.zone_boundaries[1])
         candidates = [sw for sw in swing_highs if float(sw.price) > upper]
@@ -717,9 +815,12 @@ class RetailBehaviorAnalyzer:
             if not candidates:
                 return []
         candidates.sort(key=lambda sw: abs(float(sw.price) - upper))
-        max_distance = upper * (0.05 if timeframe == "1D" else 0.02)
+        # Asset-specific parameters and ATR-based distance
+        params = self._get_asset_params(symbol, current_price)
+        atr = self._calculate_atr(data, period=14) if data is not None else 0.0
+        max_distance = (atr * params["atr_multiplier"]) if atr and atr > 0.0 else (upper * params["max_distance_ratio"])
         min_curr_ratio = 0.002 if timeframe == "1D" else 0.001
-        min_bound_ratio = 0.001 if timeframe == "1D" else 0.0005
+        min_bound_ratio = params["min_bound_ratio"]
         zones: List[LiquidityZone] = []
         for sw in candidates:
             distance = float(sw.price) - upper
@@ -963,5 +1064,61 @@ class RetailBehaviorAnalyzer:
         except Exception:
             pass
         return deduplicated
+
+    # ===== ASSET-SPECIFIC HELPERS =====
+    def _get_asset_params(self, symbol: str, price: float) -> Dict[str, float]:
+        """Return asset-specific thresholds for SSL/BSL detection."""
+        s = (symbol or "").upper()
+        # Forex
+        if any(x in s for x in ["USD", "=X", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "NZD"]):
+            return {
+                "min_bound_ratio": 0.0005,   # 0.05%
+                "max_distance_ratio": 0.02,  # 2%
+                "atr_multiplier": 1.5,
+            }
+        # Index futures
+        if any(x in s for x in ["MNQ", "NQ", "ES", "YM", "RTY", "NASDAQ", "SPX", "^GSPC"]):
+            return {
+                "min_bound_ratio": 0.005,    # 0.5%
+                "max_distance_ratio": 0.05,  # 5%
+                "atr_multiplier": 2.5,
+            }
+        # Commodities
+        if any(x in s for x in ["GC", "XAUUSD", "GOLD", "SI", "SILVER", "CL", "OIL"]):
+            return {
+                "min_bound_ratio": 0.003,    # 0.3%
+                "max_distance_ratio": 0.03,  # 3%
+                "atr_multiplier": 2.0,
+            }
+        # Crypto
+        if any(x in s for x in ["BTC", "ETH", "USDT", "CRYPTO"]):
+            return {
+                "min_bound_ratio": 0.01,     # 1%
+                "max_distance_ratio": 0.10,  # 10%
+                "atr_multiplier": 3.0,
+            }
+        # Default
+        return {
+            "min_bound_ratio": 0.001,       # 0.1%
+            "max_distance_ratio": 0.02,     # 2%
+            "atr_multiplier": 2.0,
+        }
+
+    def _calculate_atr(self, data: Optional[pd.DataFrame], period: int = 14) -> float:
+        """Compute ATR(period) on given OHLC data for dynamic thresholds."""
+        try:
+            if data is None or len(data) < 2:
+                return 0.0
+            high = data["High"].astype(float)
+            low = data["Low"].astype(float)
+            close_prev = data["Close"].astype(float).shift(1)
+            tr1 = high - low
+            tr2 = (high - close_prev).abs()
+            tr3 = (low - close_prev).abs()
+            tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+            atr = tr.rolling(window=period, min_periods=1).mean().iloc[-1]
+            return float(0.0 if pd.isna(atr) else atr)
+        except Exception:
+            return 0.0
 
 
