@@ -2,14 +2,11 @@ from __future__ import annotations
 
 import os
 from datetime import datetime
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import pandas as pd
 
-try:
-    import yfinance as yf  # type: ignore
-except Exception:  # pragma: no cover
-    yf = None  # type: ignore
+from .oanda_data_collector import OANDADataCollector
 
 from ..analyzers.structure_analyzer import MultiTimeframeStructureAnalyzer
 from ..analyzers.fibonacci_analyzer import MultiTimeframeFibonacciAnalyzer
@@ -21,19 +18,16 @@ from .context_builder import AnalysisResults, build_manus_context
 
 
 class TradingAnalyzer:
-    def __init__(self) -> None:
+    def __init__(self, api_key: Optional[str] = None) -> None:
         self.structure_analyzer = MultiTimeframeStructureAnalyzer("*")
         self.fibonacci_analyzer = MultiTimeframeFibonacciAnalyzer()
         self.retail_analyzer = RetailBehaviorAnalyzer("*")
         self.setup_detector = SetupDetector()
         self.manipulation_detector = ManipulationDetector()
+        self.data_collector = OANDADataCollector(api_key=api_key)
 
-    def _ensure_ohlc(self, df: pd.DataFrame, symbol: str) -> pd.DataFrame:
-        if isinstance(df.columns, pd.MultiIndex):
-            try:
-                df = df[symbol]
-            except Exception:
-                df = df.droplevel(-1, axis=1)
+    def _ensure_ohlc(self, df: pd.DataFrame) -> pd.DataFrame:
+        # OANDA collector returns flat columns and OHLC already
         return df[["Open", "High", "Low", "Close"]]
 
     def _resample(self, df: pd.DataFrame, rule: str) -> pd.DataFrame:
@@ -46,17 +40,12 @@ class TradingAnalyzer:
         return res
 
     def _load_and_validate_data(self, symbol: str) -> Dict[str, pd.DataFrame]:
-        assert yf is not None, "yfinance недоступен"
-        raw = yf.download(symbol, period="59d", interval="15m", auto_adjust=False, progress=False, threads=False)
+        # Fetch 15m data via OANDA API (≈1000 candles)
+        raw = self.data_collector.get_candles(symbol, "15m", count=1000)
         if raw.empty:
-            for iv in ("30m", "60m"):
-                raw = yf.download(symbol, period="3mo", interval=iv, auto_adjust=False, progress=False, threads=False)
-                if not raw.empty:
-                    break
-        if raw.empty:
-            raise RuntimeError("Нет данных от yfinance")
+            raise RuntimeError(f"Нет данных от OANDA для {symbol}")
 
-        raw = self._ensure_ohlc(raw, symbol)
+        raw = self._ensure_ohlc(raw)
         raw.index = pd.to_datetime(raw.index)
 
         data_m15 = raw.copy()

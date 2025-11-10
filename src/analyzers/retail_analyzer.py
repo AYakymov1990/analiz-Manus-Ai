@@ -23,7 +23,21 @@ class RetailBehaviorAnalyzer:
         self.symbol = symbol
         self.min_touches = 3
         self.logger = logging.getLogger(__name__)
+        # ensure logger emits INFO to console by default
+        try:
+            self.logger.setLevel(logging.INFO)
+            if not self.logger.handlers:
+                _h = logging.StreamHandler()
+                _h.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+                self.logger.addHandler(_h)
+        except Exception:
+            pass
         # Asset-specific defaults can be adjusted via _get_asset_params
+        # Pip-based distance thresholds (primarily for Forex)
+        self.min_ssl_zone_gap_pips = 10.0
+        self.min_ssl_current_gap_pips = 10.0
+        self.min_bsl_zone_gap_pips = 20.0
+        self.min_bsl_current_gap_pips = 15.0
 
     def analyze_retail_behavior(
         self,
@@ -412,10 +426,9 @@ class RetailBehaviorAnalyzer:
                 "1D",
                 symbol=self.symbol,
                 data=src_1d,
-                sr_last_touch=key_sr_levels.d1_support.last_touch if key_sr_levels.d1_support else None,
             )
-            # оставить первые по времени (макс 2)
-            zones.sort(key=lambda z: getattr(z, "swing_timestamp", datetime.min))
+            # оставить самые близкие по времени к текущему моменту (макс 2)
+            zones.sort(key=lambda z: getattr(z, "swing_timestamp", datetime.min), reverse=True)
             liquidity_zones.extend(zones[:2])
             # Fallback: если 1D SSL не найден — принудительно выбрать ближайший ниже зоны
             if not any(z.zone_type == "SSL" and z.timeframe == "1D" for z in liquidity_zones):
@@ -522,9 +535,8 @@ class RetailBehaviorAnalyzer:
                 "1D",
                 symbol=self.symbol,
                 data=src_1d,
-                sr_last_touch=key_sr_levels.d1_resistance.last_touch if key_sr_levels.d1_resistance else None,
             )
-            zones.sort(key=lambda z: getattr(z, "swing_timestamp", datetime.min))
+            zones.sort(key=lambda z: getattr(z, "swing_timestamp", datetime.min), reverse=True)
             liquidity_zones.extend(zones[:2])
         # 4H support -> все SSL (ограничить ближайшей 1)
         if key_sr_levels.h4_support and "4H" in structures:
@@ -539,41 +551,11 @@ class RetailBehaviorAnalyzer:
                 "4H",
                 symbol=self.symbol,
                 data=src_h4,
-                sr_last_touch=key_sr_levels.h4_support.last_touch if key_sr_levels.h4_support else None,
             )
-            zones.sort(key=lambda z: getattr(z, "swing_timestamp", datetime.min))
-            liquidity_zones.extend(zones[:1])
-            # ATR-based fallback if none found for 4H SSL
-            if not any(z.zone_type == "SSL" and z.timeframe == "4H" for z in liquidity_zones):
-                self.logger.warning("❌ No 4H SSL found below support zone - using ATR/historical fallback")
-                atr = self._calculate_atr(src_h4, period=14) if src_h4 is not None else 0.0
-                params = self._get_asset_params(self.symbol, runtime_current)
-                if atr > 0.0:
-                    calculated_ssl = lower - (atr * params["atr_multiplier"])
-                    self.logger.info("✅ 4H SSL added (ATR): %.6f (lower=%.6f - ATR=%.2f * %.1f)", calculated_ssl, lower, atr, params["atr_multiplier"])
-                else:
-                    historical_low = float(src_h4["Low"].min()) if src_h4 is not None and len(src_h4) > 0 else lower
-                    if historical_low < lower:
-                        calculated_ssl = historical_low
-                        self.logger.info("✅ 4H SSL added (historical low): %.6f", calculated_ssl)
-                    else:
-                        calculated_ssl = lower * (1.0 - params["max_distance_ratio"] / 2.0)
-                        self.logger.info("✅ 4H SSL added (percentage): %.6f", calculated_ssl)
-                liquidity_zones.append(
-                    LiquidityZone(
-                        price=float(calculated_ssl),
-                        zone_type="SSL",
-                        strength=float(key_sr_levels.h4_support.strength),
-                        estimated_volume="medium",
-                        retail_logic=f"Retail stops below 4H support (zone: {lower:.6f}-{float(key_sr_levels.h4_support.zone_boundaries[1]):.6f}) [calculated]",
-                        timeframe="4H",
-                        derived_from_sr_boundaries=(
-                            float(key_sr_levels.h4_support.zone_boundaries[0]),
-                            float(key_sr_levels.h4_support.zone_boundaries[1]),
-                        ),
-                        sr_timeframe="4H",
-                    )
-                )
+            zones.sort(key=lambda z: getattr(z, "swing_timestamp", datetime.min), reverse=True)
+            # Allow up to two discrete SSLs on 4H (most recent first)
+            liquidity_zones.extend(zones[:2])
+            # Без fallback: если не нашли — не добавляем вычислительные уровни
         # 4H resistance -> все BSL (ограничить ближайшей 1)
         if key_sr_levels.h4_resistance and "4H" in structures:
             struct = structures["4H"]
@@ -587,41 +569,10 @@ class RetailBehaviorAnalyzer:
                 "4H",
                 symbol=self.symbol,
                 data=src_h4,
-                sr_last_touch=key_sr_levels.h4_resistance.last_touch if key_sr_levels.h4_resistance else None,
             )
-            zones.sort(key=lambda z: getattr(z, "swing_timestamp", datetime.min))
+            zones.sort(key=lambda z: getattr(z, "swing_timestamp", datetime.min), reverse=True)
             liquidity_zones.extend(zones[:1])
-            # ATR-based fallback if none found for 4H BSL
-            if not any(z.zone_type == "BSL" and z.timeframe == "4H" for z in liquidity_zones):
-                self.logger.warning("❌ No 4H BSL found above resistance zone - using ATR/historical fallback")
-                atr = self._calculate_atr(src_h4, period=14) if src_h4 is not None else 0.0
-                params = self._get_asset_params(self.symbol, runtime_current)
-                if atr > 0.0:
-                    calculated_bsl = upper + (atr * params["atr_multiplier"])
-                    self.logger.info("✅ 4H BSL added (ATR): %.6f (upper=%.6f + ATR=%.2f * %.1f)", calculated_bsl, upper, atr, params["atr_multiplier"])
-                else:
-                    historical_high = float(src_h4["High"].max()) if src_h4 is not None and len(src_h4) > 0 else upper
-                    if historical_high > upper:
-                        calculated_bsl = historical_high
-                        self.logger.info("✅ 4H BSL added (historical high): %.6f", calculated_bsl)
-                    else:
-                        calculated_bsl = upper * (1.0 + params["max_distance_ratio"] / 2.0)
-                        self.logger.info("✅ 4H BSL added (percentage): %.6f", calculated_bsl)
-                liquidity_zones.append(
-                    LiquidityZone(
-                        price=float(calculated_bsl),
-                        zone_type="BSL",
-                        strength=float(key_sr_levels.h4_resistance.strength),
-                        estimated_volume="medium",
-                        retail_logic=f"Retail stops above 4H resistance (zone: {float(key_sr_levels.h4_resistance.zone_boundaries[0]):.6f}-{upper:.6f}) [calculated]",
-                        timeframe="4H",
-                        derived_from_sr_boundaries=(
-                            float(key_sr_levels.h4_resistance.zone_boundaries[0]),
-                            float(key_sr_levels.h4_resistance.zone_boundaries[1]),
-                        ),
-                        sr_timeframe="4H",
-                    )
-                )
+            # Без fallback: если не нашли — не добавляем вычислительные уровни
 
         return self._deduplicate_liquidity_zones(liquidity_zones)
 
@@ -660,7 +611,6 @@ class RetailBehaviorAnalyzer:
         swing_lows: List[SwingPoint],
         current_price: float,
         timeframe: str,
-        sr_last_touch: Optional[str] = None,
     ) -> Optional[LiquidityZone]:
         lower = float(key_level.zone_boundaries[0])
         candidates = [sw for sw in swing_lows if float(sw.price) < lower]
@@ -671,15 +621,6 @@ class RetailBehaviorAnalyzer:
             candidates = [sw for sw in candidates if float(sw.price) < current_price]
             if not candidates:
                 return None
-        # Time-gate by last touch if present
-        if sr_last_touch:
-            try:
-                cut = datetime.fromisoformat(sr_last_touch.replace("+00:00", ""))
-                tfiltered = [sw for sw in candidates if getattr(sw, "timestamp", None) and sw.timestamp >= cut]
-                if tfiltered:
-                    candidates = tfiltered
-            except Exception:
-                pass
         # Sort chronologically (earliest first)
         candidates.sort(key=lambda sw: getattr(sw, "timestamp", datetime.min))
         max_distance = lower * (0.05 if timeframe == "1D" else 0.02)
@@ -720,7 +661,6 @@ class RetailBehaviorAnalyzer:
         swing_highs: List[SwingPoint],
         current_price: float,
         timeframe: str,
-        sr_last_touch: Optional[str] = None,
     ) -> Optional[LiquidityZone]:
         upper = float(key_level.zone_boundaries[1])
         candidates = [sw for sw in swing_highs if float(sw.price) > upper]
@@ -731,15 +671,6 @@ class RetailBehaviorAnalyzer:
             candidates = [sw for sw in candidates if float(sw.price) > current_price]
             if not candidates:
                 return None
-        # Time-gate by last touch if present
-        if sr_last_touch:
-            try:
-                cut = datetime.fromisoformat(sr_last_touch.replace("+00:00", ""))
-                tfiltered = [sw for sw in candidates if getattr(sw, "timestamp", None) and sw.timestamp >= cut]
-                if tfiltered:
-                    candidates = tfiltered
-            except Exception:
-                pass
         # Sort chronologically (earliest first)
         candidates.sort(key=lambda sw: getattr(sw, "timestamp", datetime.min))
         max_distance = upper * (0.05 if timeframe == "1D" else 0.02)
@@ -780,47 +711,45 @@ class RetailBehaviorAnalyzer:
         timeframe: str,
         symbol: str = "UNKNOWN",
         data: Optional[pd.DataFrame] = None,
-        sr_last_touch: Optional[str] = None,
     ) -> List[LiquidityZone]:
         lower = float(key_level.zone_boundaries[0])
+        self.logger.info("[SSL/%s] Zone lower=%.6f, current=%.6f, swings_in=%d", timeframe, lower, current_price, len(swing_lows))
         candidates = [sw for sw in swing_lows if float(sw.price) < lower]
+        self.logger.info("[SSL/%s] initial candidates below zone: %d", timeframe, len(candidates))
         if not candidates:
             return []
         if current_price > 0:
+            before = len(candidates)
             candidates = [sw for sw in candidates if float(sw.price) < current_price]
+            self.logger.info("[SSL/%s] after current filter (<current): %d (was %d)", timeframe, len(candidates), before)
             if not candidates:
                 return []
-        # Time-gate by last touch if present
-        if sr_last_touch:
-            try:
-                cut = datetime.fromisoformat(sr_last_touch.replace("+00:00", ""))
-                tfiltered = [sw for sw in candidates if getattr(sw, "timestamp", None) and sw.timestamp >= cut]
-                if tfiltered:
-                    candidates = tfiltered
-            except Exception:
-                pass
         # Sort chronologically (earliest first)
         candidates.sort(key=lambda sw: getattr(sw, "timestamp", datetime.min))
-        # Asset-specific parameters and ATR-based distance
-        params = self._get_asset_params(symbol, current_price)
-        atr = self._calculate_atr(data, period=14) if data is not None else 0.0
-        max_distance = (atr * params["atr_multiplier"]) if atr and atr > 0.0 else (lower * params["max_distance_ratio"])
-        min_curr_ratio = 0.002 if timeframe == "1D" else 0.001
-        min_bound_ratio = params["min_bound_ratio"]
+        # Упрощённые правила + пипсовые пороги: ниже зоны, не снят текущей ценой, не слишком близко
         zones: List[LiquidityZone] = []
-        for sw in candidates:
+        is_forex = any(x in (symbol or "").upper() for x in ["USD", "=X", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "NZD"])
+        for idx, sw in enumerate(candidates):
             distance = lower - float(sw.price)
-            if distance > max_distance:
-                continue
             if current_price > 0:
                 dist_curr = abs(float(sw.price) - current_price) / current_price
-                max_curr = 0.20 if timeframe == "1D" else 0.15
-                if dist_curr < min_curr_ratio or dist_curr > max_curr:
+                # фильтр снятия: текущая цена не должна быть <= свинга (иначе уже снято)
+                if current_price <= float(sw.price):
+                    self.logger.info("[SSL/%s] reject[%d] %.6f ts=%s reason=swept_by_current (current=%.6f)",
+                                     timeframe, idx, float(sw.price), getattr(sw, "timestamp", None), current_price)
                     continue
-            if lower > 0:
-                dist_bound = distance / lower
-                if dist_bound < min_bound_ratio:
+            if is_forex:
+                zone_gap_pips = (lower - float(sw.price)) * 10000.0
+                curr_gap_pips = (current_price - float(sw.price)) * 10000.0 if current_price > 0 else float("inf")
+                if zone_gap_pips < self.min_ssl_zone_gap_pips or curr_gap_pips < self.min_ssl_current_gap_pips:
+                    self.logger.info("[SSL/%s] reject[%d] %.6f ts=%s reason=pip_gaps zone=%.1fp curr=%.1fp (min_zone=%.1fp,min_curr=%.1fp)",
+                                     timeframe, idx, float(sw.price), getattr(sw, "timestamp", None),
+                                     zone_gap_pips, curr_gap_pips, self.min_ssl_zone_gap_pips, self.min_ssl_current_gap_pips)
                     continue
+            self.logger.info("[SSL/%s] accept[%d] price=%.6f ts=%s dist_bound=%.5f dist_curr=%.5f",
+                             timeframe, idx, float(sw.price), getattr(sw, "timestamp", None),
+                             (lower - float(sw.price)) / lower if lower > 0 else -1.0,
+                             (abs(float(sw.price) - current_price) / current_price) if current_price > 0 else -1.0)
             zones.append(LiquidityZone(
                 price=float(sw.price),
                 zone_type="SSL",
@@ -833,6 +762,7 @@ class RetailBehaviorAnalyzer:
                 swing_timestamp=getattr(sw, "timestamp", None),
                 swing_strength=float(getattr(sw, "strength", 0.0) or 0.0),
             ))
+        self.logger.info("[SSL/%s] zones selected: %d", timeframe, len(zones))
         return zones
 
     def _find_all_bsl_from_key_level(
@@ -843,47 +773,45 @@ class RetailBehaviorAnalyzer:
         timeframe: str,
         symbol: str = "UNKNOWN",
         data: Optional[pd.DataFrame] = None,
-        sr_last_touch: Optional[str] = None,
     ) -> List[LiquidityZone]:
         upper = float(key_level.zone_boundaries[1])
+        self.logger.info("[BSL/%s] Zone upper=%.6f, current=%.6f, swings_in=%d", timeframe, upper, current_price, len(swing_highs))
         candidates = [sw for sw in swing_highs if float(sw.price) > upper]
+        self.logger.info("[BSL/%s] initial candidates above zone: %d", timeframe, len(candidates))
         if not candidates:
             return []
         if current_price > 0:
+            before = len(candidates)
             candidates = [sw for sw in candidates if float(sw.price) > current_price]
+            self.logger.info("[BSL/%s] after current filter (>current): %d (was %d)", timeframe, len(candidates), before)
             if not candidates:
                 return []
-        # Time-gate by last touch if present
-        if sr_last_touch:
-            try:
-                cut = datetime.fromisoformat(sr_last_touch.replace("+00:00", ""))
-                tfiltered = [sw for sw in candidates if getattr(sw, "timestamp", None) and sw.timestamp >= cut]
-                if tfiltered:
-                    candidates = tfiltered
-            except Exception:
-                pass
         # Sort chronologically (earliest first)
         candidates.sort(key=lambda sw: getattr(sw, "timestamp", datetime.min))
-        # Asset-specific parameters and ATR-based distance
-        params = self._get_asset_params(symbol, current_price)
-        atr = self._calculate_atr(data, period=14) if data is not None else 0.0
-        max_distance = (atr * params["atr_multiplier"]) if atr and atr > 0.0 else (upper * params["max_distance_ratio"])
-        min_curr_ratio = 0.002 if timeframe == "1D" else 0.001
-        min_bound_ratio = params["min_bound_ratio"]
+        # Упрощённые правила + пипсовые пороги: выше зоны, не снят текущей ценой, не слишком близко
         zones: List[LiquidityZone] = []
-        for sw in candidates:
+        is_forex = any(x in (symbol or "").upper() for x in ["USD", "=X", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "NZD"])
+        for idx, sw in enumerate(candidates):
             distance = float(sw.price) - upper
-            if distance > max_distance:
-                continue
             if current_price > 0:
                 dist_curr = abs(float(sw.price) - current_price) / current_price
-                max_curr = 0.20 if timeframe == "1D" else 0.15
-                if dist_curr < min_curr_ratio or dist_curr > max_curr:
+                # фильтр снятия: текущая цена не должна быть >= свинга (иначе уже снято)
+                if current_price >= float(sw.price):
+                    self.logger.info("[BSL/%s] reject[%d] %.6f ts=%s reason=swept_by_current (current=%.6f)",
+                                     timeframe, idx, float(sw.price), getattr(sw, "timestamp", None), current_price)
                     continue
-            if upper > 0:
-                dist_bound = distance / upper
-                if dist_bound < min_bound_ratio:
+            if is_forex:
+                zone_gap_pips = (float(sw.price) - upper) * 10000.0
+                curr_gap_pips = (float(sw.price) - current_price) * 10000.0 if current_price > 0 else float("inf")
+                if zone_gap_pips < self.min_bsl_zone_gap_pips or curr_gap_pips < self.min_bsl_current_gap_pips:
+                    self.logger.info("[BSL/%s] reject[%d] %.6f ts=%s reason=pip_gaps zone=%.1fp curr=%.1fp (min_zone=%.1fp,min_curr=%.1fp)",
+                                     timeframe, idx, float(sw.price), getattr(sw, "timestamp", None),
+                                     zone_gap_pips, curr_gap_pips, self.min_bsl_zone_gap_pips, self.min_bsl_current_gap_pips)
                     continue
+            self.logger.info("[BSL/%s] accept[%d] price=%.6f ts=%s dist_bound=%.5f dist_curr=%.5f",
+                             timeframe, idx, float(sw.price), getattr(sw, "timestamp", None),
+                             (float(sw.price) - upper) / upper if upper > 0 else -1.0,
+                             (abs(float(sw.price) - current_price) / current_price) if current_price > 0 else -1.0)
             zones.append(LiquidityZone(
                 price=float(sw.price),
                 zone_type="BSL",
@@ -896,6 +824,7 @@ class RetailBehaviorAnalyzer:
                 swing_timestamp=getattr(sw, "timestamp", None),
                 swing_strength=float(getattr(sw, "strength", 0.0) or 0.0),
             ))
+        self.logger.info("[BSL/%s] zones selected: %d", timeframe, len(zones))
         return zones
 
     def _assess_retail_likelihood(self, level_price: float, level_type: str) -> bool:
@@ -1067,10 +996,10 @@ class RetailBehaviorAnalyzer:
                 prev = filtered[-1]
                 p_curr = float(z.price)
                 p_prev = float(prev.price)
-                # Порог: форекс — 50 пипсов, иначе 0.1% от цены
+                # Порог: форекс — 30 пипсов, иначе 0.1% от цены
                 if max(p_curr, p_prev) < 10.0:
                     dist_pips = abs(p_curr - p_prev) * 10000.0
-                    too_close = dist_pips < 50.0
+                    too_close = dist_pips < 30.0
                 else:
                     too_close = abs(p_curr - p_prev) / max(p_prev, 1e-9) < 0.001
                 if not too_close:

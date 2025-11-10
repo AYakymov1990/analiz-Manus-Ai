@@ -5,26 +5,22 @@ from typing import Dict
 
 import pandas as pd
 
-try:
-    import yfinance as yf  # type: ignore
-except Exception:  # pragma: no cover
-    yf = None  # type: ignore
-
 from src.core.strategy_engine import TradingAnalyzer
 from src.analyzers.structure_analyzer import MultiTimeframeStructureAnalyzer
 from src.analyzers.fibonacci_analyzer import MultiTimeframeFibonacciAnalyzer
 from src.analyzers.retail_analyzer import RetailBehaviorAnalyzer
+from src.core.oanda_data_collector import OANDADataCollector
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Trading Strategy Analyzer - Context Builder for Manus AI")
-    parser.add_argument("symbol", type=str, help="Yahoo Finance symbol, e.g., GC=F, EURUSD=X, BTC-USD")
+    parser.add_argument("symbol", type=str, help="Trading symbol (e.g., EURUSD, GBPUSD, XAUUSD, NAS100, SPX500)")
     parser.add_argument("--no-save", action="store_true", help="Do not save JSON output to file")
     parser.add_argument("--emit-summary", action="store_true", help="Also emit legacy real_chain_summary.json")
     parser.add_argument("--single-file", action="store_true", help="Write only output/real_chain/manus_ai_context.json and skip symbol+timestamp file")
     args = parser.parse_args()
 
-    analyzer = TradingAnalyzer()
+    analyzer = TradingAnalyzer(api_key=os.getenv("OANDA_API_KEY"))
     # If --single-file is used, suppress engine's timestamped output
     context = analyzer.analyze(args.symbol, save_output=not (args.no_save or args.single_file))
 
@@ -45,14 +41,9 @@ def main() -> None:
             json.dump(context, f, ensure_ascii=False, indent=2)
 
     if args.emit_summary:
-        assert yf is not None, "yfinance недоступен"
-        # Сгенерировать real_chain_summary.json (совместимо с тестом)
-        raw = yf.download(args.symbol, period="59d", interval="15m", auto_adjust=False, progress=False, threads=False)
-        if isinstance(raw.columns, pd.MultiIndex):
-            try:
-                raw = raw[args.symbol]
-            except Exception:
-                raw = raw.droplevel(-1, axis=1)
+        # Generate real_chain_summary.json using OANDA data
+        collector = OANDADataCollector(api_key=os.getenv("OANDA_API_KEY"))
+        raw = collector.get_candles(args.symbol, "15m", count=1000)
         raw = raw[["Open", "High", "Low", "Close"]]
         raw.index = pd.to_datetime(raw.index)
         data_m15 = raw.copy()
